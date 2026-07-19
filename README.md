@@ -4,7 +4,7 @@
 
 A Windows-friendly image collection utility built around permission-aware discovery, streamed validation, and duplicate prevention. It accepts a public page or direct image URL, discovers bounded candidates, validates retained content, and records enough state to resume safely without executing downloaded files.
 
-## What it demonstrates
+## Collection safeguards
 
 - Standard HTTP mode for predictable page and direct-image workflows.
 - Optional Playwright mode for trusted, JavaScript-rendered pages only.
@@ -50,7 +50,7 @@ Browser mode is not a bypass mechanism. It does not automate login or grant perm
 
 ## Configuration
 
-The checked-in example highlights the safety and performance controls. On first run, the application merges it with bounded defaults and writes the complete local configuration. Runtime configuration, downloaded media, indexes, logs, reports, partial transfers, and exports are excluded from version control.
+`image_downloader_config.example.json` lists the safety and performance controls. On first run, the application fills omitted values from bounded defaults and writes the resolved settings to the local configuration. Git excludes runtime configuration, downloaded media, indexes, logs, reports, partial transfers, and exports.
 
 ## Verification
 
@@ -68,7 +68,3 @@ The offline safety suite exercises visible-output defaults, URL and destination 
 - The user is responsible for copyright, license, privacy, rate-limit, and site-policy compliance.
 - No downloaded media, credentials, browser profile, runtime diagnostics, executable, or generated package index is included.
 - The source remains copyright-protected; see [LICENSE.md](LICENSE.md).
-
-## Engineering focus
-
-The design emphasizes cautious input handling, streamed integrity checks, explicit resource budgets, adaptive backpressure, deterministic state, and privacy-conscious operational evidence.
