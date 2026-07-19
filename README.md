@@ -14,6 +14,8 @@ Image Downloader turns permissioned collection from public pages or direct image
 - Validator-gated partial resume, atomic finalization, adaptive concurrency, bounded retries, and single-instance ownership.
 - Visible download output by default; the Windows hidden-file attribute is an explicit configuration opt-in.
 
+Downloaded bytes remain provisional until destination, type, size, decode, duplicate, and integrity checks pass. Resume improves continuity, while atomic finalization prevents a partial or suspect transfer from being presented as complete.
+
 This tool does **not** bypass authentication, paywalls, access controls, robots/site policy, or technical restrictions. Confirm that the content owner and the relevant site permit each download.
 
 ## Quick start
@@ -51,6 +53,8 @@ Browser mode is not a bypass mechanism. It does not automate login or grant perm
 ## Configuration
 
 `image_downloader_config.example.json` lists the safety and performance controls. On first run, the application fills omitted values from bounded defaults and writes the resolved settings to the local configuration. Git excludes runtime configuration, downloaded media, indexes, logs, reports, partial transfers, and exports.
+
+The versioned configuration centralizes network timeouts, worker and retry bounds, content limits, duplicate policy, resume policy, browser scope, and visibility defaults.
 
 ## Verification
 
