@@ -20,7 +20,7 @@ from image_downloader import (
 )
 
 
-class PublicBehaviorTests(unittest.TestCase):
+class SafetyBehaviorTests(unittest.TestCase):
     def test_downloaded_media_is_visible_by_default(self) -> None:
         self.assertFalse(HIDE_DOWNLOADED_MEDIA_DEFAULT)
         self.assertFalse(default_config()["hide_downloaded_media"])
@@ -100,7 +100,7 @@ class PublicBehaviorTests(unittest.TestCase):
         self.assertIn("Reconciliation result: NOT EVALUATED", summary)
         self.assertNotIn("Reconciliation result: PASS", summary)
 
-    def test_public_source_excludes_private_workflow_labels(self) -> None:
+    def test_source_excludes_private_workflow_labels(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "image_downloader.py").read_text(encoding="utf-8").lower()
         labels = [
             "chat" + "gpt",

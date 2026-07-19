@@ -1,5 +1,7 @@
 # Image Downloader
 
+[![CI](https://github.com/Jnapier2/image-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/Jnapier2/image-downloader/actions/workflows/ci.yml)
+
 A Windows-friendly image collection utility built around permission-aware discovery, streamed validation, and duplicate prevention. It accepts a public page or direct image URL, discovers bounded candidates, validates retained content, and records enough state to resume safely without executing downloaded files.
 
 ## What it demonstrates
@@ -48,7 +50,7 @@ Browser mode is not a bypass mechanism. It does not automate login or grant perm
 
 ## Configuration
 
-The checked-in example highlights the public safety and performance controls. On first run, the application merges it with bounded defaults and writes the complete local configuration. Runtime configuration, downloaded media, indexes, logs, reports, partial transfers, and exports are excluded from version control.
+The checked-in example highlights the safety and performance controls. On first run, the application merges it with bounded defaults and writes the complete local configuration. Runtime configuration, downloaded media, indexes, logs, reports, partial transfers, and exports are excluded from version control.
 
 ## Verification
 
@@ -57,7 +59,7 @@ python -m compileall -q image_downloader.py tests
 python -m unittest discover -s tests -v
 ```
 
-The public test suite exercises visible-output defaults, URL and destination controls, dangerous-content classification, SVG active-content detection, safe filenames, HTTP range parsing, duplicate safeguards, and browser-route guardrails without making network requests.
+The offline safety suite exercises visible-output defaults, URL and destination controls, dangerous-content classification, SVG active-content detection, safe filenames, HTTP range parsing, duplicate safeguards, and browser-route guardrails without making network requests.
 
 ## Boundaries
 
@@ -67,6 +69,6 @@ The public test suite exercises visible-output defaults, URL and destination con
 - No downloaded media, credentials, browser profile, runtime diagnostics, executable, or generated package index is included.
 - The source remains copyright-protected; see [LICENSE.md](LICENSE.md).
 
-## Portfolio context
+## Engineering focus
 
-This project is a compact example of reliability-oriented automation: cautious input handling, streamed integrity checks, explicit resource budgets, adaptive backpressure, deterministic state, and privacy-conscious operational evidence.
+The design emphasizes cautious input handling, streamed integrity checks, explicit resource budgets, adaptive backpressure, deterministic state, and privacy-conscious operational evidence.

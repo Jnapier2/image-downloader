@@ -52,7 +52,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 APP_NAME = "Image Downloader"
 APP_VERSION = "2026.07.18.1"
-BUILD_NAME = "public-portfolio-release"
+BUILD_NAME = "stable"
 BUILD_DATE = "2026-07-18 CDT"
 CONFIG_FILENAME = "image_downloader_config.json"
 SCRIPT_FILENAME = "image_downloader.py"
@@ -323,7 +323,7 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         f"Generated: {now_local()}",
         f"Version: {APP_VERSION}",
         f"Build: {BUILD_NAME}",
-        "Source: current public runtime configuration and local read-only checks",
+        "Source: current effective configuration and local read-only checks",
         "",
         "Runtime snapshot (redacted):",
         f"- Project root: {safe_display_path(root)}",
@@ -346,9 +346,9 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         "",
         "Security/VPN posture:",
         "- No antivirus, firewall, VPN, adapter, MAC, serial, account, or local IP enumeration is performed in diagnostics.",
-        "- Public source includes no bundled executables, hidden execution, downloaded-file auto-run, firewall changes, services, or autostart changes.",
+        "- The application includes no bundled executables, hidden execution, downloaded-file auto-run, firewall changes, services, or autostart changes.",
         f"- Downloaded media visible-file default: {not bool(cfg.get('hide_downloaded_media', False))}; users may opt in to the Windows hidden attribute.",
-        f"- Backend VPN/IP resilience enabled: {bool(cfg.get('network_resilience_enabled', True))}",
+        f"- Network resilience enabled: {bool(cfg.get('network_resilience_enabled', True))}",
         f"- HTTP session refresh on network error: {bool(cfg.get('network_reset_session_on_error', True))}",
         f"- Optional browser context reset on browser/network error: {bool(cfg.get('network_browser_reset_on_error', True))}",
         "",
@@ -357,7 +357,7 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         "- This project performs public HTTP(S) image/page fetches only; it does not store credentials, cookies, webhooks, wallet keys, or API tokens.",
         "- Per-site permission/terms remain user responsibility because pasted URLs can point to arbitrary third-party websites.",
         "",
-        "Public support boundary:",
+        "Support boundary:",
         "- Keep outputs folder-local and review redacted diagnostics before sharing.",
     ]
     return "\n".join(lines).rstrip() + "\n"
@@ -563,7 +563,7 @@ def default_config() -> Dict[str, Any]:
             "status": ASSET_STATUS,
             "sensitivity": ASSET_SENSITIVITY,
             "tags": ["image-downloader", "config", "standard-mode", "asset-metadata"],
-            "lineage": "current public configuration",
+            "lineage": "current effective configuration",
         },
         "custom_input_assurance_enabled": True,
         "platform_api_compliance_enabled": True,
@@ -634,7 +634,7 @@ def downloaded_asset_id(digest: str) -> str:
 
 
 def enrich_download_asset_record(record: Dict[str, Any], *, digest: str = "", url: str = "") -> Dict[str, Any]:
-    """Add compact public metadata to an existing download-index record."""
+    """Add compact support metadata to an existing download-index record."""
     value = dict(record) if isinstance(record, dict) else {}
     digest_value = str(digest or value.get("sha256") or "")
     path_value = str(value.get("path") or "")
@@ -4057,7 +4057,7 @@ def dependency_environment_summary(root: Path, config_path: Path) -> str:
         "- HTTP sessions are thread-local by default so concurrent downloads do not fight over one pooled session.",
         "- This helps VPN or IP changes recover without adding a new menu option.",
         "",
-        "Public support posture:",
+        "Support posture:",
         "- Runtime folders, caches, downloads, and local configuration are excluded from version control.",
         "- Diagnostics redact likely credentials and user-specific filesystem paths.",
         "- Standard launchers validate prerequisites and preserve command exit codes.",
@@ -4166,8 +4166,8 @@ def config_input_assurance_summary(root: Path, config_path: Path) -> str:
         f"- Recognized keys: {len(recognized_keys)}",
         f"- Runtime-consumed/config-policy keys: {len(runtime_keys)}",
         f"- Launcher-contract keys: {len(launcher_contract_keys.intersection(recognized_keys))}",
-        f"- Public metadata keys: {len(evidence_metadata_keys)}",
-        "- Mapping categories: runtime controls and public support metadata.",
+        f"- Support metadata keys: {len(evidence_metadata_keys)}",
+        "- Mapping categories: runtime controls and support metadata.",
         f"- Unknown/custom keys: {len(unknown_keys)}",
         f"- Status: {status}",
         "- Verification chain: known keys are normalized before runtime use; unknown keys are retained for forward compatibility and reported below.",
@@ -4187,7 +4187,7 @@ def config_input_assurance_summary(root: Path, config_path: Path) -> str:
 
 
 def asset_metadata_reconciliation_summary(root: Path, config_path: Path) -> str:
-    """Summarize public source files and the runtime image catalog."""
+    """Summarize application files and the runtime image catalog."""
     manifest: Dict[str, Any] = {"metadata_schema": ASSET_METADATA_SCHEMA}
     records: List[Dict[str, Any]] = []
     required_fields = {"path"}
@@ -4259,11 +4259,11 @@ def asset_metadata_reconciliation_summary(root: Path, config_path: Path) -> str:
     else:
         package_status = "verified" if not (missing_files or missing_fields or stale_static or header_gaps or unregistered) else "warning"
     lines = [
-        "Public asset metadata summary:",
+        "Application asset metadata summary:",
         f"- Metadata schema: {manifest.get('metadata_schema', ASSET_METADATA_SCHEMA) if isinstance(manifest, dict) else ASSET_METADATA_SCHEMA}",
         f"- Project: {PROJECT_SLUG}",
         f"- Package status: {package_status}",
-        f"- Public source records: {len(records)}; root files visible to diagnostics: {len(actual_release_files)}",
+        f"- Application source records: {len(records)}; root files visible to diagnostics: {len(actual_release_files)}",
         f"- Missing files: {len(missing_files)}; missing required fields: {len(missing_fields)}; unregistered files: {len(unregistered)}",
         f"- Static hash/size conflicts: {len(stale_static)}; mutable release-default drift: {len(mutable_drift)}; key metadata header gaps: {len(header_gaps)}",
         "- Policy: runtime image metadata stays in the local state index; no per-image sidecar files are created.",
@@ -4285,9 +4285,9 @@ def asset_metadata_reconciliation_summary(root: Path, config_path: Path) -> str:
     if unregistered:
         lines.append("- Unregistered release file detail: " + ", ".join(unregistered[:20]))
     if package_status == "verified":
-        lines.append("- Reconciliation result: PASS - public metadata and runtime index checks completed.")
+        lines.append("- Reconciliation result: PASS - application metadata and runtime index checks completed.")
     elif package_status == "not-configured":
-        lines.append("- Reconciliation result: NOT EVALUATED - no public source metadata registry is configured.")
+        lines.append("- Reconciliation result: NOT EVALUATED - no application metadata registry is configured.")
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
@@ -4306,7 +4306,7 @@ def support_scope_summary(root: Path, config_path: Path) -> str:
 def public_safety_summary(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
     lines = [
-        "Public safety snapshot:",
+        "Safety snapshot:",
         f"- App version/build: {APP_VERSION} / {BUILD_NAME}",
         f"- Standard mode default: {not bool(cfg.get('browser_mode', False))}",
         f"- Dry-run default: {bool(cfg.get('dry_run', False))}",
@@ -4367,7 +4367,7 @@ def verification_coverage_summary(root: Path, config_path: Path) -> str:
         ("runtime_evidence", "local", "Logs, reports, state, downloads, and support bundles stay in ignored project-local folders."),
     ]
     lines = [
-        "Public verification coverage:",
+        "Verification coverage:",
         f"- Root: {safe_display_path(root)}",
         f"- Config: {safe_display_path(config_path, root)}",
     ]
@@ -4381,7 +4381,7 @@ def verification_scope_summary(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
     lines = [
         "Verification scope:",
-        "- Automated tests cover public defaults, URL parsing, private-address rejection, content-type checks, SVG active-content checks, and helper boundaries.",
+        "- Automated tests cover safety defaults, URL parsing, private-address rejection, content-type checks, SVG active-content checks, and helper boundaries.",
         "- Static checks confirm redirect and optional-browser route guards are present.",
         "- A live browser session and arbitrary third-party sites remain environment-dependent and are not claimed as universally compatible.",
         f"- Optional browser mode configured: {bool(cfg.get('browser_mode', False))}",
@@ -4601,7 +4601,7 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         "",
         duplicate_detection_summary(root, config_path).rstrip(),
         "",
-        "Public support highlights:",
+        "Support highlights:",
         "- Diagnostic collection includes configuration, run state, failures, sequence statistics, environment, and bounded log summaries.",
         "- Redacted system-aware diagnostics include runtime/tooling evidence without raw PC reports or hardware/network identifiers.",
         "- Single-instance, schema/migration, queue/backpressure, and time-trace evidence are summarized without adding new BAT/menu options.",
@@ -4629,7 +4629,7 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         "Local support scope:",
         support_scope_summary(root, config_path).rstrip(),
         "",
-        "Public safety:",
+        "Safety:",
         public_safety_summary(root, config_path).rstrip(),
         "",
         "Verification scope:",
@@ -5432,10 +5432,10 @@ def run_self_test() -> int:
             "Platform/API compliance and drift snapshot",
             "Local support scope",
             "Custom-input / config assurance snapshot",
-            "Public asset metadata summary",
+            "Application asset metadata summary",
             "Automatic duplicate-detection summary",
             "Runtime path summary",
-            "Public verification coverage",
+            "Verification coverage",
             "Verification scope",
         ]:
             if heading not in diagnostic_text:
