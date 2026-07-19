@@ -72,8 +72,6 @@ CONFIG_SCHEMA_VERSION = 3
 STATE_SCHEMA_VERSION = 2
 HIDE_DOWNLOADED_MEDIA_DEFAULT = False
 MIGRATION_BACKUP_DIRNAME = "migration_backups"
-EXPORT_AUDIT_FILENAME = "deep_conflict_audit.txt"
-NESTED_LAYOUT_CLEANUP_FILENAME = "nested_layout_cleanup_latest.json"
 PARTIAL_DIRNAME = "partials"
 PARTIAL_METADATA_SUFFIX = ".json"
 
@@ -1706,10 +1704,6 @@ def process_status(pid: int) -> Tuple[bool, str]:
 def process_start_signature(pid: int) -> str:
     alive, signature = process_status(pid)
     return signature if alive else ""
-
-
-def process_is_alive(pid: int) -> bool:
-    return process_status(pid)[0]
 
 
 def _safe_lock_owner_summary(meta: Dict[str, Any]) -> str:
@@ -4325,187 +4319,6 @@ def public_safety_summary(root: Path, config_path: Path) -> str:
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
-def archive_nested_release_folder(root: Path, cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Report a nested copy without modifying user files."""
-    result: Dict[str, Any] = {
-        "enabled": bool(cfg.get("archive_nested_package_conflicts", True)),
-        "checked_at": now_local(),
-        "status": "not_checked",
-        "archived_from": "",
-        "archived_to": "",
-        "reason": "",
-    }
-    if not result["enabled"]:
-        result["status"] = "disabled"
-        return result
-    nested = root / "ImageDownloader"
-    markers = [SCRIPT_FILENAME, "run_image_downloader.bat", CONFIG_FILENAME]
-    if not nested.is_dir() or not any((nested / name).exists() for name in markers):
-        result["status"] = "no_nested_package_copy_detected"
-        return result
-    result.update({
-        "status": "manual_review_required",
-        "archived_from": short_path(nested, root),
-        "reason": "nested release copy detected; no files were moved or deleted",
-    })
-    json_dump(root / STATE_DIRNAME / NESTED_LAYOUT_CLEANUP_FILENAME, result)
-    return result
-
-
-def nested_layout_cleanup_summary(root: Path) -> str:
-    data = json_load(root / STATE_DIRNAME / NESTED_LAYOUT_CLEANUP_FILENAME, {})
-    lines = ["Nested package layout cleanup:"]
-    if not isinstance(data, dict) or not data:
-        lines.append("- No cleanup event recorded for this build yet.")
-        return "\n".join(lines)
-    lines.append(f"- Status: {data.get('status', 'unknown')}")
-    if data.get("archived_from") or data.get("archived_to"):
-        lines.append(f"- Archived from: {data.get('archived_from', '')}")
-        lines.append(f"- Archived to: {data.get('archived_to', '')}")
-    if data.get("reason"):
-        lines.append(f"- Reason: {data.get('reason')}")
-    return "\n".join(lines)
-
-
-SUPERSEDED_SUPPORT_DOCS: Tuple[str, ...] = ()
-SUPERSEDED_SUPPORT_DOCS_CLEANUP_FILENAME = "superseded_support_docs_cleanup_latest.json"
-
-
-def archive_superseded_support_docs(root: Path, cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Retained compatibility hook that never modifies user documentation."""
-    result: Dict[str, Any] = {
-        "enabled": bool(cfg.get("archive_superseded_support_docs", True)),
-        "checked_at": now_local(),
-        "status": "not_checked",
-        "archived_files": [],
-        "archive_folder": "",
-        "reason": "",
-    }
-    if not result["enabled"]:
-        result["status"] = "disabled"
-        return result
-    candidates = [root / name for name in SUPERSEDED_SUPPORT_DOCS if (root / name).is_file()]
-    if not candidates:
-        result["status"] = "no_superseded_split_docs_detected"
-        json_dump(root / STATE_DIRNAME / SUPERSEDED_SUPPORT_DOCS_CLEANUP_FILENAME, result)
-        return result
-    result.update({
-        "status": "manual_review_required",
-        "archived_files": [path.name for path in candidates],
-        "reason": "older support documents were detected; no files were moved or deleted",
-    })
-    json_dump(root / STATE_DIRNAME / SUPERSEDED_SUPPORT_DOCS_CLEANUP_FILENAME, result)
-    return result
-
-
-def superseded_support_docs_summary(root: Path) -> str:
-    data = json_load(root / STATE_DIRNAME / SUPERSEDED_SUPPORT_DOCS_CLEANUP_FILENAME, {})
-    lines = ["Superseded support-doc cleanup:"]
-    if not isinstance(data, dict) or not data:
-        lines.append("- No cleanup event recorded for this build yet.")
-        return "\n".join(lines)
-    lines.append(f"- Status: {data.get('status', 'unknown')}")
-    files = data.get("archived_files") if isinstance(data.get("archived_files"), list) else []
-    if files:
-        lines.append(f"- Archived files: {', '.join(str(x) for x in files)}")
-    if data.get("archive_folder"):
-        lines.append(f"- Archive folder: {data.get('archive_folder')}")
-    if data.get("reason"):
-        lines.append(f"- Reason: {data.get('reason')}")
-    return "\n".join(lines)
-
-
-def known_good_state_note(root: Path, config_path: Path) -> str:
-    cfg = json_load(config_path, {})
-    lines = [
-        f"{APP_NAME} known-good / rollback note",
-        f"Generated: {now_local()}",
-        f"Version: {APP_VERSION}",
-        f"Build: {BUILD_NAME}",
-        f"Build date: {BUILD_DATE}",
-        "",
-        "Known-good marker:",
-        "- The portfolio edition preserves the validated downloader core while publishing visible output by default.",
-        "- Connectivity retries, coalesced session renewal, adaptive submission limits, and redacted diagnostics remain available.",
-        "",
-        "Preserved behavior:",
-        "- Standard Mode default; Safe Browser Mode optional/trusted-sites-only.",
-        "- Dry-run available but OFF by default.",
-        "- Sequential discovery remains bounded, same-domain by default, duplicate-safe, and header plus strict raster validated.",
-        "- Responsive/lazy/JSON-LD/CSS discovery and optional Safe Browser response capture are bounded backend additions.",
-        "- Validator-gated partial resume, server-aware retry, connectivity-only extra attempts, and adaptive throttle behavior remain internal with no new launcher choice.",
-        "- VPN/IP-change recovery remains backend-only and concurrent reset requests are coalesced.",
-        "- Generated support bundles are capped, allowlisted, and redacted.",
-        "",
-        "Rollback:",
-        "- Roll back through version control if a portfolio-edition change behaves unexpectedly.",
-        "- If the tool behaves unexpectedly, run --diagnose and review the local report before replacing files.",
-        "",
-        nested_layout_cleanup_summary(root),
-        "",
-        superseded_support_docs_summary(root),
-    ]
-    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
-
-
-def runtime_support_brief(root: Path, config_path: Path) -> str:
-    lines = [
-        f"{APP_NAME} runtime support brief",
-        f"Generated: {now_local()}",
-        f"Current version: {APP_VERSION}",
-        f"Current build: {BUILD_NAME}",
-        f"Build date: {BUILD_DATE}",
-        "",
-        "Runtime scope:",
-        f"- Active project root: {safe_display_path(root)}",
-        f"- Active config: {safe_display_path(config_path, root)}",
-        "",
-        "Why this build exists:",
-        "- The public edition combines bounded discovery, visible output, validator-gated partial resume, streamed verification, and duplicate controls.",
-        "- Network failures use bounded retries and adaptive backpressure without adding launcher complexity.",
-        "",
-        "Do not regress:",
-        "- Do not add menu options for backend reliability fixes.",
-        "- Keep Standard Mode default, Safe Browser optional/trusted-sites-only, dry-run OFF, and sequence discovery opt-in.",
-        "- Do not bundle executables or auto-run downloaded files.",
-    ]
-    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
-
-
-def lean_package_audit(root: Path, config_path: Path) -> str:
-    cfg = json_load(config_path, {})
-    lines = [
-        f"{APP_NAME} lean package audit",
-        f"Generated: {now_local()}",
-        f"Version: {APP_VERSION}",
-        f"Build: {BUILD_NAME}",
-        "",
-        "Lean changes:",
-        "- Release remains a shallow root-layout package; the adaptive scheduler/reconnect controller lives in the existing Python source, with no new helper module, launcher, dependency file, or menu.",
-        "- Diagnostics summarize runtime, health, transport, and discovery evidence without adding support files to the repository.",
-        "- Existing files and folders are reported but never moved or deleted during startup.",
-        "",
-        "Package-root duplicate posture:",
-        duplicate_scan(root).rstrip(),
-        "",
-        nested_layout_cleanup_summary(root),
-        "",
-        superseded_support_docs_summary(root),
-    ]
-    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
-
-
-def public_support_notes(root: Path, config_path: Path) -> str:
-    sections = [
-        known_good_state_note(root, config_path).rstrip(),
-        runtime_support_brief(root, config_path).rstrip(),
-        runtime_health_review(root, config_path).rstrip(),
-        verification_scope_summary(root, config_path).rstrip(),
-        lean_package_audit(root, config_path).rstrip(),
-    ]
-    return redact_sensitive_text("\n\n---\n\n".join(section for section in sections if section).rstrip() + "\n")
-
-
 def launcher_info(root: Path) -> str:
     lines = [
         f"{APP_NAME} launcher info",
@@ -4619,63 +4432,6 @@ def transport_discovery_summary(root: Path, config_path: Path) -> str:
         json.dumps(redact_json_for_export(recent.get("adaptive_throttle", {})), indent=2, ensure_ascii=False) if isinstance(recent.get("adaptive_throttle"), dict) and recent.get("adaptive_throttle") else "- No completed run adaptive-throttle evidence yet.",
     ]
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
-
-
-def duplicate_scan(root: Path) -> str:
-    lines = [f"{APP_NAME} duplicate/lean-project scan", f"Generated: {now_local()}", ""]
-    files: List[Path] = []
-    folders: List[Path] = []
-    excluded_dirs = {"downloads", "logs", "exports", "state", "reports", "__pycache__", ".git", ".venv", "venv", "env", "node_modules"}
-    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
-        dirnames[:] = [name for name in dirnames if name.lower() not in excluded_dirs]
-        current = Path(dirpath)
-        for dirname in dirnames:
-            folders.append(current / dirname)
-        for filename in filenames:
-            files.append(current / filename)
-    by_name: Dict[str, List[Path]] = {}
-    by_hash: Dict[str, List[Path]] = {}
-    for f in files:
-        by_name.setdefault(f.name.lower(), []).append(f)
-        try:
-            by_hash.setdefault(sha256_file(f), []).append(f)
-        except OSError:
-            pass
-    name_dupes = {k: v for k, v in by_name.items() if len(v) > 1}
-    hash_dupes = {k: v for k, v in by_hash.items() if len(v) > 1}
-    lines.append(f"Scanned files: {len(files)}")
-    lines.append(f"Scanned folders: {len(folders)}")
-    nested = root / "ImageDownloader"
-    if nested.is_dir() and any((nested / name).exists() for name in [SCRIPT_FILENAME, "run_image_downloader.bat", CONFIG_FILENAME]):
-        lines.append("Nested package folder: CHECK - ImageDownloader/ contains another release copy. This usually means a ZIP was extracted inside the live bot folder.")
-        lines.append("Nested package action: no automatic move or deletion; review the duplicate manually after confirming its contents.")
-    else:
-        lines.append("Nested package folder: PASS")
-    lines.append(f"Duplicate filenames: {len(name_dupes)} group(s)")
-    for name, paths in sorted(name_dupes.items()):
-        lines.append(f"- {name}: " + ", ".join(short_path(p, root) for p in paths))
-    lines.append(f"Duplicate file hashes: {len(hash_dupes)} group(s)")
-    for digest, paths in sorted(hash_dupes.items()):
-        lines.append(f"- {digest[:12]}: " + ", ".join(short_path(p, root) for p in paths))
-    if not name_dupes and not hash_dupes:
-        lines.append("No duplicate project source/support files detected.")
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def file_inventory(root: Path) -> str:
-    lines = [f"{APP_NAME} file inventory", f"Generated: {now_local()}", ""]
-    for path in sorted(root.iterdir(), key=lambda p: p.name.lower()):
-        if path.name.lower() in {"downloads", "logs", "exports", "state", "reports", "__pycache__"}:
-            lines.append(f"{path.name}/ - runtime folder excluded from package/export bulk")
-            continue
-        if path.is_file():
-            lines.append(f"{path.name} - {path.stat().st_size} bytes - sha256 {sha256_file(path)}")
-        elif path.is_dir():
-            if path.name.lower() == "imagedownloader":
-                lines.append(f"{path.name}/ - nested package copy detected; no automatic move or deletion")
-            else:
-                lines.append(f"{path.name}/")
-    return "\n".join(lines).rstrip() + "\n"
 
 
 def logs_summary(root: Path, limit: int) -> str:
@@ -4804,54 +4560,6 @@ def time_trace_summary(root: Path) -> str:
     ])
 
 
-def deep_conflict_audit(root: Path, config_path: Path) -> str:
-    cfg = json_load(config_path, {})
-    lines = [
-        f"{APP_NAME} deep conflict / issue / duplicate audit",
-        f"Generated: {now_local()}",
-        f"Version: {APP_VERSION}",
-        f"Build: {BUILD_NAME}",
-        "",
-        "Audit result:",
-        "- PASS: Standard Mode remains the default flow; no extra BAT/menu options added.",
-        "- PASS: Safe Browser Mode remains optional/trusted-sites-only with browser context reuse.",
-        "- PASS: Sequential discovery remains bounded by same-domain, candidate, failure, anchor, and probe-delay controls.",
-        "- PASS: Duplicate URL/content protection remains active while per-run retry friction is reduced.",
-        "- PASS: Network/VPN resilience remains backend-only through session refresh and bounded retry/backoff.",
-        "- PASS: Support bundles exclude downloads, caches, browser runtimes, and bulky logs.",
-        "- PASS: Config and state schema handling includes bounded validation and safe local migration.",
-        "- PASS: The single-instance guard prevents accidental shared-state contention with stale-lock recovery.",
-        "- PASS: Queue and backpressure capacity are explicit and visible in diagnostics.",
-        "- FIXED: Run summaries now carry top-level run ID, per-URL run ID, elapsed time, terminal status, schema, network, sequence, and pressure evidence.",
-        "- PASS: Compact platform/API drift evidence is generated without launch-time web crawling.",
-        "- PASS: Support-bundle collection records omissions and collector outcomes.",
-        "- PASS: Windows lock liveness uses a non-signalling process query and process creation signatures detect PID reuse.",
-        "- FIXED: mutable config/state migration and cleanup now occur only after top-level instance ownership.",
-        "- FIXED: completed config migration now publishes the target schema number instead of repeatedly retaining the source schema.",
-        "- FIXED: one-shot URL mode returns a failure exit code when nothing was saved or recognized as an existing duplicate.",
-        "- FIXED: Support-bundle collection records included, omitted, and failed entries.",
-        "- CHANGED: Completed image files are visible by default; the Windows hidden attribute remains an explicit opt-in.",
-        "- PASS: Dependency versions are declared in requirements files and launchers never install or upgrade packages silently.",
-        "",
-        duplicate_scan(root).rstrip(),
-        "",
-        nested_layout_cleanup_summary(root),
-        "",
-        superseded_support_docs_summary(root),
-        "",
-        instance_guard_summary(root, cfg),
-        "",
-        schema_migration_summary(root, cfg),
-        "",
-        backpressure_summary(root, cfg),
-        "",
-        integration_registry_summary(root, config_path).rstrip(),
-        "",
-        time_trace_summary(root),
-    ]
-    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
-
-
 def diagnostic_report(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
     recent = json_load(root / STATE_DIRNAME / RECENT_RUN_FILENAME, {})
@@ -4933,8 +4641,6 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         "Verification coverage:",
         verification_coverage_summary(root, config_path).rstrip(),
         "",
-        superseded_support_docs_summary(root),
-        "",
         "Launcher info:",
         launcher_info(root).rstrip(),
         "",
@@ -4978,116 +4684,6 @@ def write_diagnostics(root: Path, config_path: Path) -> Path:
     write_text_atomic(latest, report_text)
     return report_path
 
-
-def upgrade_review_notes(root: Path, config_path: Path) -> str:
-    cfg = json_load(config_path, {})
-    lines = [
-        f"{APP_NAME} upgrade review notes",
-        f"Generated: {now_local()}",
-        f"Version: {APP_VERSION}",
-        f"Build: {BUILD_NAME}",
-        "",
-        "Public-edition decisions:",
-        "- Applied now: local adaptive AIMD/EWMA download submission control, per-host Retry-After cooldown, connectivity-only extra attempts, and debounced/coalesced HTTP session renewal.",
-        "- Preserved: bounded modern-page discovery, optional browser network-image observation, validator-gated resume, streamed verification, and failure-isolated support evidence.",
-        "- Applied: initial, redirected, final, and optional-browser network requests are limited to globally routable destinations.",
-        "- Applied: launchers remain portable and report dependency installation commands without installing silently.",
-        "- Applied: timing/run-ID evidence, single-instance guard, config/state schemas, migration backups, and queue/backpressure evidence remain locally available.",
-        "- Applied: Backend-only VPN/IP-change resilience now resets stale HTTP sessions and optional browser contexts after network failures, with no new menu option.",
-        "- Applied: Safe Browser Mode now reuses one Playwright browser/context per active process instead of launching Chromium for every fetched page.",
-        "- Partially applied: Network-heavy paths now catch request/IO/runtime errors more specifically; top-level guards still protect the interactive flow from crashing.",
-        "- Deferred: Splitting the single Python file into many modules was not applied in this build because the current priority is a lean, portable, easy-transfer package with a small file count.",
-        "",
-        "Configured safety posture:",
-        f"- Standard Mode default: {not bool(cfg.get('browser_mode', False))}",
-        f"- Dry run default/configured: {bool(cfg.get('dry_run', False))}",
-        f"- Downloaded media visible by default on Windows: {not bool(cfg.get('hide_downloaded_media', False))}",
-        f"- Sequential same-domain only: {cfg.get('sequence_same_domain_only')}",
-        f"- Sequence max candidates/group: {cfg.get('sequence_max_candidates_per_group')}",
-        f"- Sequence max failed attempts: {cfg.get('sequence_max_failed_attempts')}",
-        f"- Browser context reuse: {cfg.get('browser_reuse_context', True)}",
-        f"- Network resilience enabled: {cfg.get('network_resilience_enabled', True)}",
-        f"- HTTP session reset on network error: {cfg.get('network_reset_session_on_error', True)}",
-        f"- Session reset debounce ms: {cfg.get('network_session_reset_debounce_ms', 1000)}",
-        f"- Connectivity-only extra attempts: {cfg.get('network_recovery_extra_attempts', 2)}",
-        f"- Adaptive throttle enabled/mode: {cfg.get('adaptive_throttle_enabled', True)} / {cfg.get('adaptive_throttle_mode', 'feedback_aimd')}",
-        f"- Stale state guard: {stale_state_status(root, cfg)}",
-    ]
-    return "\n".join(lines).rstrip() + "\n"
-
-
-def runtime_health_review(root: Path, config_path: Path) -> str:
-    cfg = json_load(config_path, {})
-    lines = [
-        f"{APP_NAME} project health / layering review",
-        f"Generated: {now_local()}",
-        f"Version: {APP_VERSION}",
-        f"Build: {BUILD_NAME}",
-        f"Build date: {BUILD_DATE}",
-        "",
-        "Deep-review outcome:",
-        "- PASS: Bounded adaptive reconnect/throttle behavior preserves discovery, validation, visible-media defaults, state, and export behavior.",
-        "- PASS: Standard Mode remains the fast default path.",
-        "- PASS: Safe Browser Mode remains optional/trusted-sites-only and reuses its browser context.",
-        "- PASS: Sequential discovery remains bounded by same-domain, max candidates, max failures, and duplicate URL/content guards.",
-        "- PASS: Support bundles exclude downloaded images, caches, Playwright runtimes, and bulky state.",
-        "- PASS: No bundled executables or hidden downloaded-file execution paths are part of the package.",
-        "- PASS: Completed image files remain visible by default; users may explicitly opt in to the native Windows Hidden attribute, and downloaded files are never executed.",
-        "- PASS: Runtime image metadata remains centralized in the ignored local state index without per-image sidecar files.",
-        "- PASS: Incremental submission and local adaptive concurrency prevent eager executor flooding while preserving the configured worker ceiling.",
-        "- PASS: HTTP 429/5xx/network/slow-response pressure lowers the active limit; healthy completions restore it additively.",
-        "- PASS: VPN/IP/session resets are debounced so concurrent workers do not trigger repeated generation churn.",
-        "- PASS: Support bundles use a bounded allowlist, isolate collector failures, record hashes, and exclude recursive archives.",
-        "- FIXED: Config/state/report atomic writes now use unique temporary filenames before replace to reduce cross-process collision risk.",
-        "- FIXED: Existing user files and folders are no longer moved or deleted during normal startup.",
-        "- FIXED: Per-run duplicate queues reset for each pasted URL so failed attempts can be retried in the same console.",
-        "- FIXED: Parallel downloads use thread-local HTTP sessions by default to avoid shared-session conflicts.",
-        "- FIXED: Duplicate top-level launches now fail visibly instead of silently contending for shared state.",
-        "- FIXED: Config/state schemas are versioned with safe backup-first migration and newer-schema refusal.",
-        "- FIXED: Candidate/backpressure limits are explicit and exported.",
-        "",
-        "Layer map:",
-        "1. BAT launcher layer: run from the repository folder, validate Python and dependencies, and preserve child-process exit codes.",
-        "2. CLI/session layer: keep mode flags and interactive loop isolated from download logic.",
-        "3. Network layer: separate connect/read timeouts, monotonic caps, Retry-After/backoff, coalesced VPN/IP session refresh, connectivity-only extra retries, validator-gated Range resume, thread-local sessions, and local adaptive concurrency feedback.",
-        "4. Parser/discovery layer: HTML attributes, responsive srcsets/imagesrcset, metadata, JSON-LD, CSS, noscript, optional browser response capture, gallery candidates, and sequential seeds.",
-        "5. Validation/download layer: dangerous extension/content blocking, image magic checks, streamed Pillow/pixel verification, max-size checks, duplicate URL/hash checks, and atomic target writes.",
-        "6. Operational integrity layer: instance ownership, config/state schema migration, bounded candidate pressure, run IDs, elapsed timing, and graceful cleanup.",
-        "7. Diagnostics/export layer: current config, build/version, run summaries, failures, sequence stats, logs, launcher info, deep conflict audit, and lean project scans.",
-        "",
-        "Privacy-aware support posture:",
-        "- Redacted system/runtime summary is included in diagnostics/export without raw PC reports.",
-        "- Usernames/home paths, query-token values, and obvious secret keys are redacted in generated export evidence.",
-        "- Log rotation keeps runtime logs bounded by config instead of growing indefinitely.",
-        "- No security bypasses, services, firewall changes, or autostart changes are made.",
-        "",
-        "Digital asset metadata posture:",
-        asset_metadata_reconciliation_summary(root, config_path).rstrip(),
-        "",
-        "Current config posture:",
-        f"- browser_mode: {cfg.get('browser_mode', False)}",
-        f"- dry_run: {cfg.get('dry_run', False)}",
-        f"- hide_downloaded_media: {cfg.get('hide_downloaded_media', False)}",
-        f"- workers: {cfg.get('workers')}",
-        f"- thread_local_http_sessions: {cfg.get('thread_local_http_sessions', True)}",
-        f"- network_resilience_enabled: {cfg.get('network_resilience_enabled', True)}",
-        f"- adaptive_throttle_enabled: {cfg.get('adaptive_throttle_enabled', True)}",
-        f"- adaptive_throttle_mode: {cfg.get('adaptive_throttle_mode', 'feedback_aimd')}",
-        f"- sequence_discovery_enabled: {cfg.get('sequence_discovery_enabled', False)}",
-        f"- sequence_same_domain_only: {cfg.get('sequence_same_domain_only', True)}",
-        f"- custom_input_assurance_enabled: {cfg.get('custom_input_assurance_enabled', True)}",
-        "",
-        duplicate_scan(root).rstrip(),
-        "",
-        file_inventory(root).rstrip(),
-        "",
-        nested_layout_cleanup_summary(root),
-        "",
-        superseded_support_docs_summary(root),
-        "",
-        upgrade_review_notes(root, config_path).rstrip(),
-    ]
-    return "\n".join(lines).rstrip() + "\n"
 
 def read_file_snapshot(
     path: Path,
@@ -5298,8 +4894,6 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
         ("generated.config", "image_downloader_config_redacted.json", True, lambda: (json.dumps(redact_json_for_export(cfg), indent=2, ensure_ascii=False) + "\n", cfg_snapshot_meta)),
         ("generated.diagnostic", "diagnostic_report.txt", True, diagnostic_collector),
         ("generated.environment", "dependency_environment_summary.txt", True, lambda: dependency_environment_summary(root, config_path)),
-        ("generated.audit", "deep_conflict_audit.txt", True, lambda: deep_conflict_audit(root, config_path)),
-        ("generated.support_notes", "public_support_notes.txt", True, lambda: public_support_notes(root, config_path)),
         ("generated.safety", "public_safety_status.txt", True, lambda: public_safety_summary(root, config_path) + "\n" + duplicate_detection_summary(root, config_path) + "\n" + asset_metadata_reconciliation_summary(root, config_path) + "\n" + verification_scope_summary(root, config_path) + "\n" + support_scope_summary(root, config_path) + "\n" + verification_coverage_summary(root, config_path) + "\n" + config_input_assurance_summary(root, config_path) + "\n" + transport_discovery_summary(root, config_path)),
         ("generated.logs", "logs_summary.txt", False, lambda: logs_summary(root, safe_int(cfg.get("log_tail_lines_for_export", 400), 400, min_value=20, max_value=2000))),
         ("generated.recent_run", "recent_run_summary.json", True, lambda: state_json_text(RECENT_RUN_FILENAME, {})),
@@ -5827,7 +5421,7 @@ def run_self_test() -> int:
             if candidate_export.name in names or any(name.lower().endswith(".zip") for name in names):
                 print("Self-test failed: export recursively included an archive.")
                 return 1
-            for required_name in ["diagnostic_report.txt", "public_support_notes.txt", "recent_failures_errors.json", "public_safety_status.txt"]:
+            for required_name in ["diagnostic_report.txt", "recent_failures_errors.json", "public_safety_status.txt"]:
                 if required_name not in names:
                     print(f"Self-test failed: export missing {required_name}.")
                     return 1

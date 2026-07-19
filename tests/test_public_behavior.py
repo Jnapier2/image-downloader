@@ -120,9 +120,6 @@ class PublicBehaviorTests(unittest.TestCase):
         for label in labels:
             with self.subTest(label=label):
                 self.assertNotIn(label, source)
-        main_source = source[source.index("def main(") :]
-        self.assertNotIn("archive_nested_release_folder(", main_source)
-        self.assertNotIn("archive_superseded_support_docs(", main_source)
 
 
 if __name__ == "__main__":
