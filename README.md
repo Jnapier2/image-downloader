@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Jnapier2/image-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/Jnapier2/image-downloader/actions/workflows/ci.yml)
 
-A Windows-friendly image collection utility built around permission-aware discovery, streamed validation, and duplicate prevention. It accepts a public page or direct image URL, discovers bounded candidates, validates retained content, and records enough state to resume safely without executing downloaded files.
+Image Downloader turns permissioned collection from public pages or direct image URLs into a controlled, repeatable workflow. Bounded discovery, streamed validation, duplicate controls, and resumable state help limit rework and unusable output while preserving clear site-policy and network-safety boundaries.
 
 ## Collection safeguards
 
