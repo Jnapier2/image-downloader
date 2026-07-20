@@ -100,6 +100,11 @@ class SafetyBehaviorTests(unittest.TestCase):
         self.assertIn("Reconciliation result: NOT EVALUATED", summary)
         self.assertNotIn("Reconciliation result: PASS", summary)
 
+    def test_unknown_config_warning_mentions_only_supported_diagnostic_command(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "image_downloader.py").read_text(encoding="utf-8")
+        self.assertIn("Run /diagnose for a redacted custom-input assurance summary.", source)
+        self.assertNotIn("/diagnose or /export", source)
+
     def test_source_excludes_private_workflow_labels(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "image_downloader.py").read_text(encoding="utf-8").lower()
         labels = [

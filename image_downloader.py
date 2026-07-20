@@ -1870,7 +1870,7 @@ class ImageDownloader:
         unknown_keys = unknown_config_keys(self.config)
         if unknown_keys and bool(self.config.get("custom_input_assurance_enabled", True)):
             print("Warning: unknown config key(s) detected and preserved but not consumed by this build: " + ", ".join(unknown_keys[:10]))
-            print("Run /diagnose or /export for the redacted custom-input assurance summary.")
+            print("Run /diagnose for a redacted custom-input assurance summary.")
         if browser_mode is not None:
             self.config["browser_mode"] = bool(browser_mode)
         if dry_run is not None:
