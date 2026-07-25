@@ -1,0 +1,152 @@
+name: Apply reviewed 2026.07.19.1 timeout release
+
+on:
+  push:
+    branches: [agent/reconcile-2026-07-19-1-timeout]
+    paths:
+      - .github/workflows/apply-2026-07-19-1-timeout.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-2026-07-19-1-timeout.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-image-downloader-2026-07-19-1-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apply:
+    if: github.repository == 'Jnapier2/image-downloader'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact reconciliation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/reconcile-2026-07-19-1-timeout
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Apply bounded timeout and metadata patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          @'
+          from pathlib import Path
+
+          source_path = Path('image_downloader.py')
+          text = source_path.read_text(encoding='utf-8')
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once('APP_VERSION = "2026.07.18.1"', 'APP_VERSION = "2026.07.19.1"', 'app version')
+          replace_once('BUILD_DATE = "2026-07-18 CDT"', 'BUILD_DATE = "2026-07-19 CDT"', 'build date')
+          replace_once(
+              '        "timeout": 20,\n        "connect_timeout": 7,\n        "read_timeout": 20,\n        "request_wall_clock_timeout_seconds": 120,\n        "page_wall_clock_timeout_seconds": 60,',
+              '        "timeout": 5,\n        "connect_timeout": 3,\n        "read_timeout": 5,\n        "request_wall_clock_timeout_seconds": 5,\n        "page_wall_clock_timeout_seconds": 60,',
+              'default timeout block',
+          )
+          source_path.write_text(text, encoding='utf-8', newline='\n')
+
+          example_path = Path('image_downloader_config.example.json')
+          example = example_path.read_text(encoding='utf-8')
+          old = '  "timeout": 20,\n  "connect_timeout": 7,\n  "read_timeout": 20,\n  "workers": 6,'
+          new = '  "timeout": 5,\n  "connect_timeout": 3,\n  "read_timeout": 5,\n  "request_wall_clock_timeout_seconds": 5,\n  "page_wall_clock_timeout_seconds": 60,\n  "workers": 6,'
+          if example.count(old) != 1:
+              raise SystemExit('example timeout block is not unique')
+          example_path.write_text(example.replace(old, new, 1), encoding='utf-8', newline='\n')
+
+          readme_path = Path('README.md')
+          readme = readme_path.read_text(encoding='utf-8')
+          marker = '- Validator-gated partial resume, atomic finalization, adaptive concurrency, bounded retries, and single-instance ownership.\n'
+          addition = marker + '- A strict five-second per-image network budget covers HEAD preflight, GET attempts, bounded backoff, reconnects, and streamed transfer; page discovery keeps its separate limit.\n'
+          if readme.count(marker) != 1:
+              raise SystemExit('README timeout insertion point is not unique')
+          readme_path.write_text(readme.replace(marker, addition, 1), encoding='utf-8', newline='\n')
+
+          ci_path = Path('.github/workflows/ci.yml')
+          ci = ci_path.read_text(encoding='utf-8')
+          ci = ci.replace('uses: actions/checkout@v6', 'uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1')
+          ci = ci.replace('uses: actions/setup-python@v6', 'uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0')
+          if '@v6' in ci:
+              raise SystemExit('unreconciled v6 Action reference remains')
+          ci_path.write_text(ci, encoding='utf-8', newline='\n')
+
+          test_path = Path('tests/test_release_timeout_defaults.py')
+          test_path.write_text(r'''from __future__ import annotations
+
+import json
+import unittest
+from pathlib import Path
+
+import image_downloader as app
+
+
+class ReleaseTimeoutDefaultsTests(unittest.TestCase):
+    def test_release_identity_and_five_second_image_budget(self) -> None:
+        self.assertEqual(app.APP_VERSION, "2026.07.19.1")
+        config = app.default_config()
+        self.assertEqual(config["timeout"], 5)
+        self.assertEqual(config["connect_timeout"], 3)
+        self.assertEqual(config["read_timeout"], 5)
+        self.assertEqual(config["request_wall_clock_timeout_seconds"], 5)
+        self.assertEqual(config["page_wall_clock_timeout_seconds"], 60)
+
+    def test_public_visible_output_default_is_preserved(self) -> None:
+        config = app.default_config()
+        self.assertFalse(config["hide_downloaded_media"])
+        self.assertFalse(app.HIDE_DOWNLOADED_MEDIA_DEFAULT)
+
+    def test_example_config_matches_bounded_defaults(self) -> None:
+        payload = json.loads(Path("image_downloader_config.example.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["timeout"], 5)
+        self.assertEqual(payload["connect_timeout"], 3)
+        self.assertEqual(payload["read_timeout"], 5)
+        self.assertEqual(payload["request_wall_clock_timeout_seconds"], 5)
+        self.assertEqual(payload["page_wall_clock_timeout_seconds"], 60)
+        self.assertFalse(payload["hide_downloaded_media"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+''', encoding='utf-8', newline='\n')
+          '@ | Set-Content -LiteralPath $env:RUNNER_TEMP\apply_patch.py -Encoding utf8
+          python $env:RUNNER_TEMP\apply_patch.py
+
+      - name: Install dependencies and validate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m compileall -q image_downloader.py tests
+          python -m unittest discover -s tests -v
+          python -c "import image_downloader as app; c=app.default_config(); assert app.APP_VERSION=='2026.07.19.1'; assert c['request_wall_clock_timeout_seconds']==5; assert c['page_wall_clock_timeout_seconds']==60; assert c['hide_downloaded_media'] is False; print('Image Downloader 2026.07.19.1 timeout contract: PASS')"
+
+      - name: Remove temporary workflow and commit reviewed result
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -LiteralPath .github/workflows/apply-2026-07-19-1-timeout.yml -Force
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Release Image Downloader 2026.07.19.1 timeout budget' -m 'Merge the verified five-second per-image network deadline into the stronger public-security source while preserving visible output, private-address controls, validation, duplicate detection, adaptive reconnect behavior, and report-only exports.' -m 'Copyright © 2026 Gateway Information Group LLC. All rights reserved.'
+          git push origin HEAD:agent/reconcile-2026-07-19-1-timeout
+
+# Copyright © 2026 Gateway Information Group LLC. All rights reserved.
