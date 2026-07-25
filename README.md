@@ -12,6 +12,7 @@ Image Downloader turns permissioned collection from public pages or direct image
 - Network destination checks block credentials-in-URL, loopback, private, link-local, and non-global DNS targets across initial requests, redirects, and optional browser subrequests. Because standard clients resolve hostnames again when connecting, this is defense in depth rather than a complete isolation boundary against hostile DNS rebinding; do not process untrusted URLs from a sensitive network.
 - Duplicate controls at URL, SHA-256 content, filename-conflict, and perceptual-fingerprint layers.
 - Validator-gated partial resume, atomic finalization, adaptive concurrency, bounded retries, and single-instance ownership.
+- A strict five-second per-image network budget covers HEAD preflight, GET attempts, bounded backoff, reconnects, and streamed transfer; page discovery keeps its separate limit.
 - Visible download output by default; the Windows hidden-file attribute is an explicit configuration opt-in.
 
 Downloaded bytes remain provisional until destination, type, size, decode, duplicate, and integrity checks pass. Resume improves continuity, while atomic finalization prevents a partial or suspect transfer from being presented as complete.
