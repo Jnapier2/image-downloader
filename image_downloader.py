@@ -51,9 +51,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 APP_NAME = "Image Downloader"
-APP_VERSION = "2026.07.18.1"
+APP_VERSION = "2026.07.19.1"
 BUILD_NAME = "stable"
-BUILD_DATE = "2026-07-18 CDT"
+BUILD_DATE = "2026-07-19 CDT"
 CONFIG_FILENAME = "image_downloader_config.json"
 SCRIPT_FILENAME = "image_downloader.py"
 STATE_DIRNAME = "state"
@@ -488,10 +488,10 @@ def default_config() -> Dict[str, Any]:
         "state_schema_version": STATE_SCHEMA_VERSION,
         "output": "downloads",
         "hide_downloaded_media": HIDE_DOWNLOADED_MEDIA_DEFAULT,
-        "timeout": 20,
-        "connect_timeout": 7,
-        "read_timeout": 20,
-        "request_wall_clock_timeout_seconds": 120,
+        "timeout": 5,
+        "connect_timeout": 3,
+        "read_timeout": 5,
+        "request_wall_clock_timeout_seconds": 5,
         "page_wall_clock_timeout_seconds": 60,
         "limit": 0,
         "workers": 6,
