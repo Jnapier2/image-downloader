@@ -33,4 +33,5 @@ jobs:
       - name: Test
         run: python -m unittest discover -s tests -v
 
+# Direct runtime requirements are exact-pinned; transitive packages remain pip-resolved.
 # Copyright © 2026 Gateway Information Group LLC. All rights reserved.
