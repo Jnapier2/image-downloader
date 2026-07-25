@@ -71,4 +71,10 @@ The offline safety suite exercises visible-output defaults, URL and destination 
 - Discovery is intentionally bounded; this is not a crawler or archival guarantee.
 - The user is responsible for copyright, license, privacy, rate-limit, and site-policy compliance.
 - No downloaded media, credentials, browser profile, runtime diagnostics, executable, or generated package index is included.
-- The source remains copyright-protected; see [LICENSE.md](LICENSE.md).
+- Source and documentation terms are defined in [LICENSE.md](LICENSE.md).
+
+## Portfolio and rights
+
+[Portfolio](https://jerry-napier-portfolio.netlify.app/) · [GitHub profile](https://github.com/Jnapier2)
+
+Copyright © 2026 Gateway Information Group LLC. All rights reserved. Third-party components and services retain their own rights and terms.
