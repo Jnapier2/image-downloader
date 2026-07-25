@@ -38,6 +38,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      issues: write
     steps:
       - name: Check out exact main revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -76,5 +77,12 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Release Image Downloader 2026.07.19.1 timeout budget' -m 'Merge the verified five-second per-image network deadline into the stronger public-security source while preserving visible output, private-address controls, validation, duplicate detection, adaptive reconnect behavior, and report-only exports.' -m 'Copyright © 2026 Gateway Information Group LLC. All rights reserved.'
           git push origin HEAD:main
+      - name: Report blocked reconciliation run
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh pr comment 5 --body "The fail-closed Image Downloader 2026.07.19.1 reconciliation did not create a clean application-source commit. Inspect Actions run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. Copyright © 2026 Gateway Information Group LLC. All rights reserved."
 
 # Copyright © 2026 Gateway Information Group LLC. All rights reserved.
