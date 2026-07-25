@@ -17,10 +17,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -30,3 +30,51 @@ jobs:
         run: python -m compileall -q image_downloader.py tests
       - name: Test
         run: python -m unittest discover -s tests -v
+
+  apply-reviewed-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out exact main revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Apply reviewed 2026.07.19.1 patch
+        run: python .github/scripts/apply_2026_07_19_1_timeout.py
+      - name: Compile patched source
+        run: python -m compileall -q image_downloader.py tests
+      - name: Test patched source
+        run: python -m unittest discover -s tests -v
+      - name: Verify release contract
+        run: >-
+          python -c "import image_downloader as app; c=app.default_config(); assert app.APP_VERSION=='2026.07.19.1'; assert c['timeout']==5; assert c['connect_timeout']==3; assert c['read_timeout']==5; assert c['request_wall_clock_timeout_seconds']==5; assert c['page_wall_clock_timeout_seconds']==60; assert c['hide_downloaded_media'] is False; print('Image Downloader 2026.07.19.1 timeout contract: PASS')"
+      - name: Remove one-use script and commit clean source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -LiteralPath .github/scripts/apply_2026_07_19_1_timeout.py -Force
+          if (Test-Path -LiteralPath .github/scripts) {
+            $remaining = @(Get-ChildItem -LiteralPath .github/scripts -Force)
+            if ($remaining.Count -eq 0) { Remove-Item -LiteralPath .github/scripts -Force }
+          }
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Release Image Downloader 2026.07.19.1 timeout budget' -m 'Merge the verified five-second per-image network deadline into the stronger public-security source while preserving visible output, private-address controls, validation, duplicate detection, adaptive reconnect behavior, and report-only exports.' -m 'Copyright © 2026 Gateway Information Group LLC. All rights reserved.'
+          git push origin HEAD:main
+
+# Copyright © 2026 Gateway Information Group LLC. All rights reserved.
