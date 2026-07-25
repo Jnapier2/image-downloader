@@ -8,43 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 
 
-FINAL_CI = '''name: CI
-
-on:
-  push:
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  test:
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
-      - name: Compile
-        run: python -m compileall -q image_downloader.py tests
-      - name: Test
-        run: python -m unittest discover -s tests -v
-
-# Copyright © 2026 Gateway Information Group LLC. All rights reserved.
-'''
-
-
 def replace_once(text: str, old: str, new: str, label: str) -> str:
     count = text.count(old)
     if count != 1:
@@ -82,8 +45,6 @@ def main() -> int:
     if readme.count(marker) != 1:
         raise SystemExit("README timeout insertion point is not unique")
     readme_path.write_text(readme.replace(marker, addition, 1), encoding="utf-8", newline="\n")
-
-    Path(".github/workflows/ci.yml").write_text(FINAL_CI, encoding="utf-8", newline="\n")
 
     Path("tests/test_release_timeout_defaults.py").write_text(
         '''from __future__ import annotations
