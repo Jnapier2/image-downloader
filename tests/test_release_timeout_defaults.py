@@ -8,13 +8,14 @@ import image_downloader as app
 
 
 class ReleaseTimeoutDefaultsTests(unittest.TestCase):
-    def test_release_identity_and_five_second_image_budget(self) -> None:
+    def test_release_identity_and_request_budget(self) -> None:
         self.assertEqual(app.APP_VERSION, "2026.07.19.1")
         config = app.default_config()
         self.assertEqual(config["timeout"], 5)
         self.assertEqual(config["connect_timeout"], 3)
         self.assertEqual(config["read_timeout"], 5)
-        self.assertEqual(config["request_wall_clock_timeout_seconds"], 5)
+        self.assertEqual(config["request_wall_clock_timeout_seconds"], 15)
+        self.assertEqual(app.normalize_config(dict(config))["request_wall_clock_timeout_seconds"], 15)
         self.assertEqual(config["page_wall_clock_timeout_seconds"], 60)
 
     def test_public_visible_output_default_is_preserved(self) -> None:
@@ -27,7 +28,7 @@ class ReleaseTimeoutDefaultsTests(unittest.TestCase):
         self.assertEqual(payload["timeout"], 5)
         self.assertEqual(payload["connect_timeout"], 3)
         self.assertEqual(payload["read_timeout"], 5)
-        self.assertEqual(payload["request_wall_clock_timeout_seconds"], 5)
+        self.assertEqual(payload["request_wall_clock_timeout_seconds"], 15)
         self.assertEqual(payload["page_wall_clock_timeout_seconds"], 60)
         self.assertFalse(payload["hide_downloaded_media"])
 

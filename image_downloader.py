@@ -491,7 +491,7 @@ def default_config() -> Dict[str, Any]:
         "timeout": 5,
         "connect_timeout": 3,
         "read_timeout": 5,
-        "request_wall_clock_timeout_seconds": 5,
+        "request_wall_clock_timeout_seconds": 15,
         "page_wall_clock_timeout_seconds": 60,
         "limit": 0,
         "workers": 6,
