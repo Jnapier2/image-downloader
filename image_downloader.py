@@ -69,7 +69,7 @@ LOG_FILENAME = "image_downloader.log"
 INSTANCE_LOCK_FILENAME = "image_downloader_instance.lock"
 INSTANCE_EVENTS_FILENAME = "instance_guard_events.json"
 CONFIG_SCHEMA_VERSION = 3
-STATE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 3
 HIDE_DOWNLOADED_MEDIA_DEFAULT = False
 MIGRATION_BACKUP_DIRNAME = "migration_backups"
 PARTIAL_DIRNAME = "partials"
@@ -124,6 +124,27 @@ ASSET_SENSITIVITY = "public"
 _SELF_TEST_ALLOWED_ORIGIN = ""
 RETRYABLE_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 COMMON_RASTER_FORMATS = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff"}
+WINDOWS_RESERVED_DEVICE_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
+BIDI_CONTROL_CHARACTERS = frozenset(
+    chr(codepoint)
+    for codepoint in (
+        0x061C,  # ARABIC LETTER MARK
+        0x200E,  # LEFT-TO-RIGHT MARK
+        0x200F,  # RIGHT-TO-LEFT MARK
+        *range(0x202A, 0x202F),  # embeddings, overrides, and PDF
+        *range(0x2066, 0x206A),  # directional isolates
+    )
+)
+SENSITIVE_QUERY_FIELD_TOKENS = {
+    "apikey", "accesskey", "accesstoken", "token", "secret", "password", "passwd", "pwd",
+    "cookie", "session", "sid", "credential", "accesscredential", "signature", "sig", "auth", "authorization",
+    "awsaccesskeyid", "googleaccessid", "policy", "expires", "xamzcredential",
+    "xamzsignature", "xamzsecuritytoken", "xamzexpires",
+}
 
 
 def chicago_now() -> datetime:
@@ -236,6 +257,12 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return h.hexdigest()
 
 
+def reference_sha256(value: Any) -> str:
+    """Return a stable correlation digest without persisting the original reference."""
+    text = "" if value is None else str(value)
+    return sha256_bytes(text.encode("utf-8", errors="replace")) if text else ""
+
+
 def short_path(path: Path, root: Optional[Path] = None) -> str:
     try:
         base = root or app_root()
@@ -264,14 +291,49 @@ SENSITIVE_KEY_HINTS = {
 }
 
 
+def _is_sensitive_query_field(name: str) -> bool:
+    decoded = urllib.parse.unquote_plus(str(name or "")).strip().lower()
+    token = re.sub(r"[^a-z0-9]+", "", decoded)
+    return token in SENSITIVE_QUERY_FIELD_TOKENS
+
+
+def redact_url_for_evidence(value: Any) -> str:
+    """Redact URL credentials and signed query values while retaining useful routing evidence."""
+    text = "" if value is None else str(value)
+    try:
+        parsed = urllib.parse.urlsplit(text)
+    except (TypeError, ValueError, UnicodeError):
+        parsed = None
+    if parsed is not None and parsed.scheme.lower() in {"http", "https"} and parsed.netloc:
+        netloc = parsed.netloc
+        if "@" in netloc:
+            netloc = "<REDACTED>@" + netloc.rsplit("@", 1)[1]
+        query_parts = re.split(r"([&;])", parsed.query)
+        for index in range(0, len(query_parts), 2):
+            part = query_parts[index]
+            if not part:
+                continue
+            key, separator, _value = part.partition("=")
+            if _is_sensitive_query_field(key):
+                query_parts[index] = f"{key}=<REDACTED>" if separator else f"{key}=<REDACTED>"
+        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, "".join(query_parts), parsed.fragment))
+    return re.sub(r"(?i)\b(https?://)[^/\s@]+@", r"\1<REDACTED>@", text)
+
+
 def redact_sensitive_text(value: Any) -> str:
     text = "" if value is None else str(value)
     for marker in _home_markers():
         text = text.replace(marker, "<USER_HOME>")
         text = text.replace(marker.replace("\\", "/"), "<USER_HOME>")
+    # Redact complete URL references first so embedded userinfo cannot enter logs or diagnostics.
+    text = re.sub(
+        r"(?i)\bhttps?://[^\s\"'<>]+",
+        lambda match: redact_url_for_evidence(match.group(0)),
+        text,
+    )
     # Redact common secret-bearing URL query parameters without dropping the URL host/path evidence.
     text = re.sub(
-        r"(?i)([?&](?:api[_-]?key|access[_-]?token|token|secret|password|passwd|pwd|cookie|session|sid|signature|sig|auth|authorization)=)[^&\s]+",
+        r"(?i)([?&](?:api[_-]?key|access[_-]?(?:key|token|credential)|token|secret|password|passwd|pwd|cookie|session|sid|credential|signature|sig|auth|authorization|awsaccesskeyid|googleaccessid|policy|expires|x-amz-(?:credential|signature|security-token|expires))=)[^&\s]+",
         r"\1<REDACTED>",
         text,
     )
@@ -283,6 +345,15 @@ def redact_sensitive_text(value: Any) -> str:
     )
     text = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer <REDACTED>", text)
     return text
+
+
+def evidence_reference_fields(field: str, value: Any) -> Dict[str, str]:
+    """Build a redacted evidence field plus an exact-input SHA-256 correlation field."""
+    raw = "" if value is None else str(value)
+    return {
+        field: redact_sensitive_text(raw),
+        f"{field}_sha256": reference_sha256(raw),
+    }
 
 
 def safe_display_path(path: Any, root: Optional[Path] = None) -> str:
@@ -477,7 +548,44 @@ def backup_file_for_migration(path: Path, *, label: str, keep: int = 5) -> str:
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup_name = f"{path.stem}_{label}_{timestamp_compact()}{path.suffix or '.bak'}"
     backup_path = backup_dir / backup_name
-    shutil.copy2(path, backup_path)
+    if path.name == DOWNLOAD_INDEX_FILENAME:
+        # Do not create a fresh raw-credential copy while migrating URL evidence.
+        source_state = json_load(path, {})
+        if not isinstance(source_state, dict):
+            raise RuntimeError(f"Could not create a safe migration backup for {path.name}")
+
+        def sanitize_record(record: Any) -> Any:
+            if not isinstance(record, dict):
+                return record
+            result = dict(record)
+            for field in ("url", "source", "input_url", "final_url", "signature"):
+                raw = str(result.get(field) or "")
+                if raw:
+                    result.update(evidence_reference_fields(field, raw))
+            return result
+
+        safe_state = dict(source_state)
+        for mapping_name in ("hashes", "visual_hashes"):
+            mapping = safe_state.get(mapping_name)
+            if isinstance(mapping, dict):
+                safe_state[mapping_name] = {str(key): sanitize_record(record) for key, record in mapping.items()}
+        url_mapping = safe_state.get("urls")
+        if isinstance(url_mapping, dict):
+            safe_urls: Dict[str, Any] = {}
+            for stored_key, record in url_mapping.items():
+                raw_url = str(record.get("url") or stored_key) if isinstance(record, dict) else str(stored_key)
+                existing_correlation = str(record.get("url_sha256") or "") if isinstance(record, dict) else ""
+                key_is_sha256 = bool(re.fullmatch(r"[0-9a-fA-F]{64}", str(stored_key)))
+                correlation = existing_correlation or (str(stored_key).lower() if key_is_sha256 else reference_sha256(raw_url))
+                safe_record = sanitize_record(record)
+                if isinstance(safe_record, dict):
+                    safe_record.update(evidence_reference_fields("url", raw_url))
+                    safe_record["url_sha256"] = correlation
+                safe_urls[correlation] = safe_record
+            safe_state["urls"] = safe_urls
+        json_dump(backup_path, safe_state)
+    else:
+        shutil.copy2(path, backup_path)
     retain_recent_files(backup_dir, f"{path.stem}_{label}_*", keep)
     return short_path(backup_path, path.parent)
 
@@ -636,6 +744,8 @@ def downloaded_asset_id(digest: str) -> str:
 def enrich_download_asset_record(record: Dict[str, Any], *, digest: str = "", url: str = "") -> Dict[str, Any]:
     """Add compact support metadata to an existing download-index record."""
     value = dict(record) if isinstance(record, dict) else {}
+    supplied_url = str(url or "")
+    stored_url = str(value.get("url") or "")
     digest_value = str(digest or value.get("sha256") or "")
     path_value = str(value.get("path") or "")
     saved_at = str(value.get("saved_at") or value.get("created_at") or now_local())
@@ -670,8 +780,11 @@ def enrich_download_asset_record(record: Dict[str, Any], *, digest: str = "", ur
         "media_visibility": str(value.get("media_visibility") or "unknown_legacy"),
         "media_visibility_note": str(value.get("media_visibility_note") or "visibility was not recorded by the originating build"),
     })
-    if url and not value.get("url"):
-        value["url"] = url
+    if supplied_url:
+        value.update(evidence_reference_fields("url", supplied_url))
+    elif stored_url:
+        value["url"] = redact_sensitive_text(stored_url)
+        value["url_sha256"] = str(value.get("url_sha256") or reference_sha256(stored_url))
     return value
 
 
@@ -1277,11 +1390,15 @@ def build_test_png(red: int, green: int, blue: int) -> bytes:
 
 def sanitize_filename(name: str) -> str:
     name = urllib.parse.unquote(name or "")
+    name = "".join(character for character in name if character not in BIDI_CONTROL_CHARACTERS)
     name = name.replace("\x00", "")
     name = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", name)
     name = re.sub(r"\s+", " ", name).strip().strip(".")
     if not name:
         name = "image"
+    device_stem = name.split(".", 1)[0].rstrip(" .").upper()
+    if device_stem in WINDOWS_RESERVED_DEVICE_NAMES:
+        name = f"_{name}"
     if len(name) > 140:
         root, dot, ext = name.rpartition(".")
         if dot:
@@ -1444,7 +1561,7 @@ class AdaptiveThrottle:
             "time": now_local(),
             "kind": kind,
             "host": host,
-            "reason": reason[:300],
+            "reason": redact_sensitive_text(reason)[:300],
             "limit": self.current_limit,
         }
         item.update(extra)
@@ -1469,10 +1586,11 @@ class AdaptiveThrottle:
             if global_cooldown:
                 self.global_cooldown_until = max(self.global_cooldown_until, now_mono + min(float(self.cooldown_seconds), bounded))
         self.success_streak = 0
-        self.last_reason = reason
-        self._append_event("decrease", host, reason, previous_limit=old, cooldown_seconds=round(max(0.0, cooldown), 3))
+        safe_reason = redact_sensitive_text(reason)
+        self.last_reason = safe_reason
+        self._append_event("decrease", host, safe_reason, previous_limit=old, cooldown_seconds=round(max(0.0, cooldown), 3))
         if self.current_limit != old:
-            self.logger.warning("ADAPTIVE_THROTTLE action=decrease host=%s old_limit=%s new_limit=%s reason=%s", host, old, self.current_limit, reason)
+            self.logger.warning("ADAPTIVE_THROTTLE action=decrease host=%s old_limit=%s new_limit=%s reason=%s", host, old, self.current_limit, safe_reason)
 
     def record_retry(self, host: str, *, status_code: int, delay_seconds: float, stage: str) -> None:
         if not self.enabled:
@@ -2077,6 +2195,7 @@ class ImageDownloader:
                     "time": now_local(),
                     "stage": stage,
                     "host": url_host(url),
+                    "url_sha256": reference_sha256(url),
                     "attempt": attempt + 1,
                     "status_code": status_code,
                     "delay_seconds": round(delay, 3),
@@ -2117,7 +2236,8 @@ class ImageDownloader:
             "kind": kind,
             "stage": stage,
             "host": url_host(url),
-            "reason": reason[:500],
+            "url_sha256": reference_sha256(url),
+            "reason": redact_sensitive_text(reason)[:500],
         }
         try:
             limit = max(1, int(self.config.get("network_recovery_event_limit", 25) or 25))
@@ -2292,9 +2412,25 @@ class ImageDownloader:
         if not part_path.exists() or not meta_path.exists():
             return {}
         metadata = json_load(meta_path, {})
-        if not isinstance(metadata, dict) or metadata.get("url") != url:
+        if not isinstance(metadata, dict):
             self._discard_partial(part_path, meta_path, reason="metadata mismatch")
             return {}
+        expected_url_sha256 = reference_sha256(url)
+        stored_url = str(metadata.get("url") or "")
+        stored_url_sha256 = str(metadata.get("url_sha256") or reference_sha256(stored_url))
+        if stored_url_sha256 != expected_url_sha256:
+            self._discard_partial(part_path, meta_path, reason="metadata mismatch")
+            return {}
+        sanitized = dict(metadata)
+        sanitized.update(evidence_reference_fields("url", url))
+        final_url = str(sanitized.get("final_url") or "")
+        if final_url:
+            final_url_sha256 = str(sanitized.get("final_url_sha256") or reference_sha256(final_url))
+            sanitized["final_url"] = redact_sensitive_text(final_url)
+            sanitized["final_url_sha256"] = final_url_sha256
+        if sanitized != metadata:
+            json_dump(meta_path, sanitized)
+        metadata = sanitized
         try:
             size = part_path.stat().st_size
         except OSError:
@@ -2303,7 +2439,15 @@ class ImageDownloader:
         return metadata
 
     def _write_partial_metadata(self, meta_path: Path, metadata: Dict[str, Any]) -> None:
-        json_dump(meta_path, metadata)
+        sanitized = dict(metadata)
+        for field in ("url", "final_url", "source"):
+            raw = str(sanitized.get(field) or "")
+            if not raw:
+                continue
+            correlation = str(sanitized.get(f"{field}_sha256") or reference_sha256(raw))
+            sanitized[field] = redact_sensitive_text(raw)
+            sanitized[f"{field}_sha256"] = correlation
+        json_dump(meta_path, sanitized)
 
     def _claim_download_slot(self) -> bool:
         limit = safe_int(self.config.get("limit", 0), 0, min_value=0, max_value=100000)
@@ -2363,7 +2507,7 @@ class ImageDownloader:
                 "app_version": APP_VERSION,
                 "backup": backup_ref,
                 "status": "completed",
-                "rollback_note": "Restore the backup with a compatible older build if a state schema change must be reversed.",
+                "rollback_note": "The security-redacted backup preserves content/hash/path records and SHA-256 URL correlations; review older-build compatibility before restoration.",
             }
         data["version"] = STATE_SCHEMA_VERSION
         data["state_schema_version"] = STATE_SCHEMA_VERSION
@@ -2381,19 +2525,42 @@ class ImageDownloader:
         # creating per-image sidecars or a duplicate standalone database.
         for digest, record in list(data["hashes"].items()):
             if isinstance(record, dict):
-                data["hashes"][digest] = enrich_download_asset_record(record, digest=str(digest), url=str(record.get("url") or ""))
-        for url, record in list(data["urls"].items()):
+                data["hashes"][digest] = enrich_download_asset_record(record, digest=str(digest))
+        migrated_urls: Dict[str, Dict[str, Any]] = {}
+        for stored_key, record in list(data["urls"].items()):
             if not isinstance(record, dict):
                 continue
             digest = str(record.get("sha256") or "")
             canonical = data["hashes"].get(digest) if digest else None
-            data["urls"][url] = canonical if isinstance(canonical, dict) else enrich_download_asset_record(record, digest=digest, url=str(url))
+            candidate = dict(canonical) if isinstance(canonical, dict) else enrich_download_asset_record(record, digest=digest)
+            stored_url = str(record.get("url") or "")
+            stored_url_sha256 = str(record.get("url_sha256") or "")
+            key_is_sha256 = bool(re.fullmatch(r"[0-9a-fA-F]{64}", str(stored_key)))
+            correlation = stored_url_sha256 or (str(stored_key).lower() if key_is_sha256 else reference_sha256(stored_url or stored_key))
+            if not correlation:
+                continue
+            if not key_is_sha256:
+                candidate.update(evidence_reference_fields("url", stored_url or stored_key))
+            else:
+                candidate["url"] = redact_sensitive_text(str(candidate.get("url") or stored_url))
+                candidate["url_sha256"] = correlation
+            migrated_urls[correlation] = candidate
+        data["urls"] = migrated_urls
         for digest, record in list(data["hashes"].items()):
             if not isinstance(record, dict):
                 continue
             visual = str(record.get("visual_fingerprint") or "")
             if visual and visual not in data["visual_hashes"]:
                 data["visual_hashes"][visual] = record
+        for fingerprint, record in list(data["visual_hashes"].items()):
+            if not isinstance(record, dict):
+                data["visual_hashes"].pop(fingerprint, None)
+                continue
+            digest = str(record.get("sha256") or "")
+            canonical = data["hashes"].get(digest) if digest else None
+            data["visual_hashes"][fingerprint] = (
+                canonical if isinstance(canonical, dict) else enrich_download_asset_record(record, digest=digest)
+            )
         return data
 
     def _save_download_index(self) -> None:
@@ -2618,7 +2785,7 @@ class ImageDownloader:
             "elapsed_seconds": 0,
             "last_progress_elapsed_seconds": 0,
             "terminal_status": "running",
-            "input_url": input_url,
+            **evidence_reference_fields("input_url", input_url),
             "mode": "Safe Browser Mode" if self.config.get("browser_mode") else "Standard Mode",
             "dry_run": bool(self.config.get("dry_run", False)),
             "output_dir": str(self.output_dir),
@@ -2678,32 +2845,44 @@ class ImageDownloader:
     def _record_failure(self, url: str, reason: str, *, source: str = "", stage: str = "download", status_code: int = 0, content_type: str = "") -> None:
         item = {
             "time": now_local(),
-            "url": url,
-            "source": source,
+            **evidence_reference_fields("url", url),
+            **evidence_reference_fields("source", source),
             "stage": stage,
-            "reason": reason,
+            "reason": redact_sensitive_text(reason),
             "status_code": status_code,
             "content_type": content_type,
         }
         self.failures_this_run.append(item)
         self.not_downloaded_this_run.append(item)
         self._mark_progress()
-        self.logger.info("NOT_DOWNLOADED stage=%s reason=%s url=%s", stage, reason, url)
+        self.logger.info(
+            "NOT_DOWNLOADED stage=%s reason=%s url=%s url_sha256=%s",
+            stage,
+            redact_sensitive_text(reason),
+            item["url"],
+            item["url_sha256"],
+        )
 
     def _record_not_downloaded(self, url: str, reason: str, *, source: str = "", stage: str = "download") -> None:
         item = {
             "time": now_local(),
-            "url": url,
-            "source": source,
+            **evidence_reference_fields("url", url),
+            **evidence_reference_fields("source", source),
             "stage": stage,
-            "reason": reason,
+            "reason": redact_sensitive_text(reason),
         }
         self.not_downloaded_this_run.append(item)
         self._mark_progress()
-        self.logger.info("SKIPPED stage=%s reason=%s url=%s", stage, reason, url)
+        self.logger.info(
+            "SKIPPED stage=%s reason=%s url=%s url_sha256=%s",
+            stage,
+            redact_sensitive_text(reason),
+            item["url"],
+            item["url_sha256"],
+        )
 
     def _state_url_record_exists(self, url: str) -> bool:
-        rec = self.state.get("urls", {}).get(url)
+        rec = self.state.get("urls", {}).get(reference_sha256(url))
         if not isinstance(rec, dict):
             return False
         rel = rec.get("path", "")
@@ -2726,7 +2905,6 @@ class ImageDownloader:
         rel = short_path(path, self.root)
         saved_at = now_local()
         record = enrich_download_asset_record({
-            "url": url,
             "path": rel,
             "sha256": digest,
             "bytes": bytes_saved,
@@ -2745,7 +2923,7 @@ class ImageDownloader:
             "visual_fingerprint_note": visual_fingerprint_note,
         }, digest=digest, url=url)
         self.state["asset_metadata_schema"] = ASSET_METADATA_SCHEMA
-        self.state.setdefault("urls", {})[url] = record
+        self.state.setdefault("urls", {})[reference_sha256(url)] = record
         self.state.setdefault("hashes", {})[digest] = record
         if visual_fingerprint:
             self.state.setdefault("visual_hashes", {})[visual_fingerprint] = record
@@ -3180,11 +3358,12 @@ class ImageDownloader:
                         self._mark_progress()
                     self._checkpoint_state_if_due()
                     self.logger.info(
-                        "DOWNLOADED bytes=%s validation=%s path=%s url=%s",
+                        "DOWNLOADED bytes=%s validation=%s path=%s url=%s url_sha256=%s",
                         file_size,
                         verification_mode,
                         short_path(output_path, self.root),
-                        url,
+                        redact_sensitive_text(url),
+                        reference_sha256(url),
                     )
                     print(f"Downloaded: {short_path(output_path, self.root)}")
                     return DownloadResult(url=url, status="downloaded", path=short_path(output_path, self.root), bytes_saved=file_size, sha256=digest, content_type=content_type, status_code=status_code, width=width, height=height)
@@ -3879,7 +4058,7 @@ class ImageDownloader:
         anchors = anchors[:max_anchors]
         template = by_number.get(anchors[0], patterns[0])
         group_detail = {
-            "signature": template.signature,
+            **evidence_reference_fields("signature", template.signature),
             "anchors": anchors,
             "probes_attempted": 0,
             "downloaded": 0,
@@ -3963,7 +4142,15 @@ class ImageDownloader:
             print("Invalid URL. Please paste a full http:// or https:// URL.")
             return {}
         self._start_run(normalized)
-        self.logger.info("RUN_START top_level_run_id=%s run_id=%s url=%s mode=%s dry_run=%s", self.top_level_run_id, self.run_summary.get("run_id"), normalized, self.run_summary["mode"], self.run_summary["dry_run"])
+        self.logger.info(
+            "RUN_START top_level_run_id=%s run_id=%s url=%s url_sha256=%s mode=%s dry_run=%s",
+            self.top_level_run_id,
+            self.run_summary.get("run_id"),
+            self.run_summary["input_url"],
+            self.run_summary["input_url_sha256"],
+            self.run_summary["mode"],
+            self.run_summary["dry_run"],
+        )
         try:
             if is_allowed_image_url(normalized, self.config):
                 candidates = [normalized]
@@ -3988,7 +4175,12 @@ class ImageDownloader:
                 f"failed={self.run_summary.get('failed', 0)}, "
                 f"output={self.output_dir}"
             )
-            self.logger.info("RUN_FINISH top_level_run_id=%s run_id=%s summary=%s", self.top_level_run_id, self.run_summary.get("run_id"), json.dumps(self.run_summary, ensure_ascii=False))
+            self.logger.info(
+                "RUN_FINISH top_level_run_id=%s run_id=%s summary=%s",
+                self.top_level_run_id,
+                self.run_summary.get("run_id"),
+                redact_sensitive_text(json.dumps(self.run_summary, ensure_ascii=False)),
+            )
             return self.run_summary
         except KeyboardInterrupt:
             self._finish_run("interrupted")
@@ -3998,7 +4190,11 @@ class ImageDownloader:
             self.run_summary["failed"] += 1
             self._finish_run("error")
             print(f"Error: {exc}")
-            self.logger.exception("RUN_ERROR url=%s", normalized)
+            self.logger.exception(
+                "RUN_ERROR url=%s url_sha256=%s",
+                redact_sensitive_text(normalized),
+                reference_sha256(normalized),
+            )
             return self.run_summary
 
 

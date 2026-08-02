@@ -1,6 +1,6 @@
 {
   "config_schema_version": 3,
-  "state_schema_version": 2,
+  "state_schema_version": 3,
   "output": "downloads",
   "hide_downloaded_media": false,
   "timeout": 5,
