@@ -51,9 +51,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 APP_NAME = "Image Downloader"
-APP_VERSION = "2026.07.19.1"
+APP_VERSION = "2026.08.02.1"
 BUILD_NAME = "stable"
-BUILD_DATE = "2026-07-19 CDT"
+BUILD_DATE = "2026-08-02 CDT"
 CONFIG_FILENAME = "image_downloader_config.json"
 SCRIPT_FILENAME = "image_downloader.py"
 STATE_DIRNAME = "state"
