@@ -9,7 +9,8 @@ import image_downloader as app
 
 class ReleaseTimeoutDefaultsTests(unittest.TestCase):
     def test_release_identity_and_request_budget(self) -> None:
-        self.assertEqual(app.APP_VERSION, "2026.07.19.1")
+        self.assertEqual(app.APP_VERSION, "2026.08.02.1")
+        self.assertEqual(app.BUILD_DATE, "2026-08-02 CDT")
         config = app.default_config()
         self.assertEqual(config["timeout"], 5)
         self.assertEqual(config["connect_timeout"], 3)

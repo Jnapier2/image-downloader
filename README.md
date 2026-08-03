@@ -4,12 +4,16 @@
 
 Image Downloader turns permissioned collection from public pages or direct image URLs into a controlled, repeatable workflow. Bounded discovery, streamed validation, duplicate controls, and resumable state help limit rework and unusable output while preserving clear site-policy and network-safety boundaries.
 
+**Current release: 2026.08.02.1.** This release strengthens Windows filename handling and keeps credential-bearing URL details out of persisted operational evidence while retaining SHA-256 correlation for troubleshooting. See [CHANGELOG.md](CHANGELOG.md) for the concise release history.
+
 ## Collection safeguards
 
 - Standard HTTP mode for predictable page and direct-image workflows.
 - Optional Playwright mode for trusted, JavaScript-rendered pages only.
 - Defensive rejection of executable/archive extensions, dangerous content types, oversized files, corrupt raster payloads, and active SVG content.
+- Windows reserved device names are neutralized and Unicode bidirectional controls are removed before output paths are allocated.
 - Network destination checks block credentials-in-URL, loopback, private, link-local, and non-global DNS targets across initial requests, redirects, and optional browser subrequests. Because standard clients resolve hostnames again when connecting, this is defense in depth rather than a complete isolation boundary against hostile DNS rebinding; do not process untrusted URLs from a sensitive network.
+- Persisted URL evidence redacts embedded credentials and common signed-query fields while retaining non-sensitive routing context and an exact-input SHA-256 correlation digest.
 - Duplicate controls at URL, SHA-256 content, filename-conflict, and perceptual-fingerprint layers.
 - Validator-gated partial resume, atomic finalization, adaptive concurrency, bounded retries, and single-instance ownership.
 - A strict five-second per-image network budget covers HEAD preflight, GET attempts, bounded backoff, reconnects, and streamed transfer; page discovery keeps its separate limit.
