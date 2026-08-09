@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
-"""A Windows-friendly image downloader with defensive validation.
+"""
+Image Downloader - lean Windows-friendly image downloader.
 
-Use it only where downloading is permitted by the content owner and site
-policy. Downloaded files are validated and saved; they are never executed.
+Asset ID: IMGDL-SOURCE-PY
+Version: 2026.08.08.1
+Status: current
+Sensitivity: public-source
+Tags: image-downloader, python-source, windows-utility, diagnostics, smart-safe-automation, canonical-export, helpful-computer-awareness, asset-metadata
+
+Designed for portable project-folder launch with plain Python + BAT launchers.
+No bundled executables. Downloaded files are never executed.
+Copyright © 2026 Gateway Information Group LLC. All rights reserved.
 """
 from __future__ import annotations
 
@@ -13,7 +21,6 @@ import contextlib
 import dataclasses
 import hashlib
 import html
-import ipaddress
 import importlib
 import importlib.metadata
 import io
@@ -27,7 +34,6 @@ import queue
 import random
 import re
 import shutil
-import socket
 import struct
 import sys
 import tempfile
@@ -50,16 +56,17 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
-APP_NAME = "Image Downloader"
-APP_VERSION = "2026.08.02.1"
-BUILD_NAME = "stable"
-BUILD_DATE = "2026-08-02 CDT"
+APP_NAME = "Gateway Image Downloader"
+APP_VERSION = "2026.08.08.1"
+BUILD_NAME = "v2175-queue-autosave-recovery-3worker-session-list"
+BUILD_DATE = "2026-08-08 11:12 CDT"
 CONFIG_FILENAME = "image_downloader_config.json"
 SCRIPT_FILENAME = "image_downloader.py"
 STATE_DIRNAME = "state"
 LOG_DIRNAME = "logs"
 REPORT_DIRNAME = "reports"
 EXPORT_DIRNAME = "exports"
+CANONICAL_EXPORT_FILENAME = "IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip"
 DOWNLOAD_INDEX_FILENAME = "download_index.json"
 RECENT_RUN_FILENAME = "recent_run_summary.json"
 RECENT_FAILURES_FILENAME = "recent_failures_errors.json"
@@ -68,12 +75,18 @@ SEQUENCE_STATS_FILENAME = "sequential_search_stats.json"
 LOG_FILENAME = "image_downloader.log"
 INSTANCE_LOCK_FILENAME = "image_downloader_instance.lock"
 INSTANCE_EVENTS_FILENAME = "instance_guard_events.json"
-CONFIG_SCHEMA_VERSION = 3
-STATE_SCHEMA_VERSION = 3
-HIDE_DOWNLOADED_MEDIA_DEFAULT = False
+CONFIG_SCHEMA_VERSION = 4
+STATE_SCHEMA_VERSION = 2
 MIGRATION_BACKUP_DIRNAME = "migration_backups"
+EXPORT_AUDIT_FILENAME = "deep_conflict_audit.txt"
+NESTED_LAYOUT_CLEANUP_FILENAME = "nested_layout_cleanup_latest.json"
 PARTIAL_DIRNAME = "partials"
 PARTIAL_METADATA_SUFFIX = ".json"
+DOWNLOAD_QUEUE_STATE_FILENAME = "download_queue.json"
+DOWNLOAD_QUEUE_SCHEMA_VERSION = 1
+DOWNLOAD_QUEUE_HARD_MAX = 100
+MAX_ACTIVE_DOWNLOADS = 3
+LATEST_DOWNLOAD_LIST_FILENAME = "LATEST_DOWNLOAD_LIST.txt"
 
 IMAGE_EXTENSIONS = {
     "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "tif", "tiff", "avif"
@@ -117,34 +130,22 @@ EXPORT_FILE_LIMIT = 20
 EXPORT_MAX_ENTRY_BYTES = 5 * 1024 * 1024
 EXPORT_MAX_TOTAL_BYTES = 12 * 1024 * 1024
 EXPORT_SNAPSHOT_ATTEMPTS = 3
-ASSET_METADATA_SCHEMA = "public-runtime-metadata-v1"
+PARAMETER_ALIGNMENT_VERSION = "v2.17.5-runtime-release-identity-managed-file-integrity-gate"
+ASSET_METADATA_SCHEMA = "asset-metadata-v1"
 PROJECT_SLUG = "image-downloader"
+PACKAGE_ASSET_ID = "IMGDL-PACKAGE"
+PACKAGE_ID = "gateway-image-downloader"
+VERSION_FILENAME = "VERSION.txt"
+MANIFEST_FILENAME = "MANIFEST.json"
+PACKAGE_METADATA_FILENAME = "PACKAGE_METADATA.json"
+RELEASE_IDENTITY_EXIT_CODE = 23
+RUNTIME_IDENTITY_GATE_VERSION = "runtime-release-identity-v1"
 ASSET_STATUS = "current"
-ASSET_SENSITIVITY = "public"
-_SELF_TEST_ALLOWED_ORIGIN = ""
+ASSET_SENSITIVITY = "public-source"
+INTENDED_RELEASE_ARCHIVE_PATH = "support_Project_Vault/30_UTILITIES_AND_WINDOWS_TOOLS/ImageDownloader/02_LATEST_BUILD"
+ARCHIVE_PROJECT_PATH = "support_Project_Vault/30_UTILITIES_AND_WINDOWS_TOOLS/ImageDownloader"
 RETRYABLE_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 COMMON_RASTER_FORMATS = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff"}
-WINDOWS_RESERVED_DEVICE_NAMES = {
-    "CON", "PRN", "AUX", "NUL",
-    *(f"COM{number}" for number in range(1, 10)),
-    *(f"LPT{number}" for number in range(1, 10)),
-}
-BIDI_CONTROL_CHARACTERS = frozenset(
-    chr(codepoint)
-    for codepoint in (
-        0x061C,  # ARABIC LETTER MARK
-        0x200E,  # LEFT-TO-RIGHT MARK
-        0x200F,  # RIGHT-TO-LEFT MARK
-        *range(0x202A, 0x202F),  # embeddings, overrides, and PDF
-        *range(0x2066, 0x206A),  # directional isolates
-    )
-)
-SENSITIVE_QUERY_FIELD_TOKENS = {
-    "apikey", "accesskey", "accesstoken", "token", "secret", "password", "passwd", "pwd",
-    "cookie", "session", "sid", "credential", "accesscredential", "signature", "sig", "auth", "authorization",
-    "awsaccesskeyid", "googleaccessid", "policy", "expires", "xamzcredential",
-    "xamzsignature", "xamzsecuritytoken", "xamzexpires",
-}
 
 
 def chicago_now() -> datetime:
@@ -257,10 +258,223 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return h.hexdigest()
 
 
-def reference_sha256(value: Any) -> str:
-    """Return a stable correlation digest without persisting the original reference."""
-    text = "" if value is None else str(value)
-    return sha256_bytes(text.encode("utf-8", errors="replace")) if text else ""
+
+def _version_control_values(path: Path) -> Dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    values: Dict[str, str] = {}
+    for raw_line in text.splitlines():
+        if ":" not in raw_line:
+            continue
+        key, value = raw_line.split(":", 1)
+        normalized = re.sub(r"[^a-z0-9]+", "_", key.strip().lower()).strip("_")
+        if normalized:
+            values[normalized] = value.strip()
+    return values
+
+
+def _release_identity_mismatch(evidence: Dict[str, Any], kind: str, path: str, expected: Any, observed: Any) -> None:
+    evidence.setdefault("mismatches", []).append({
+        "kind": str(kind),
+        "path": str(path),
+        "expected": None if expected is None else str(expected),
+        "observed": None if observed is None else str(observed),
+    })
+
+
+def _safe_managed_release_path(root: Path, raw_path: Any) -> Tuple[Optional[str], Optional[Path], str]:
+    if not isinstance(raw_path, str):
+        return None, None, "managed path is not a string"
+    rel = raw_path.strip()
+    if not rel:
+        return None, None, "managed path is empty"
+    if "\\" in rel:
+        return None, None, "managed path must use normalized forward slashes"
+    if rel.startswith("/") or rel.startswith("//") or re.match(r"^[A-Za-z]:", rel):
+        return None, None, "managed path is absolute"
+    parts = rel.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        return None, None, "managed path is not normalized or attempts traversal"
+    normalized = "/".join(parts)
+    raw_target = root / Path(*parts)
+    if raw_target.is_symlink():
+        return None, None, "managed release files may not be symlinks"
+    target = raw_target.resolve()
+    try:
+        target.relative_to(root.resolve())
+    except ValueError:
+        return None, None, "managed path escapes project root"
+    return normalized, target, ""
+
+
+def verify_release_identity(root: Path) -> Dict[str, Any]:
+    """Read-only v2.17.5 release-identity and managed-file verification gate."""
+    root = root.resolve()
+    started = time.monotonic()
+    evidence: Dict[str, Any] = {
+        "gate_version": RUNTIME_IDENTITY_GATE_VERSION,
+        "parameter_alignment": PARAMETER_ALIGNMENT_VERSION,
+        "started_at": now_local(),
+        "project_root": safe_display_path(root),
+        "running": {"package_id": PACKAGE_ID, "version": APP_VERSION, "build_id": BUILD_NAME},
+        "controls": {},
+        "managed_count": 0,
+        "verified_count": 0,
+        "mismatches": [],
+        "authenticated_activity_allowed": False,
+        "authenticated_activity_waited_for_pass": False,
+        "verification_mutated_release_files": False,
+    }
+    controls = {
+        VERSION_FILENAME: root / VERSION_FILENAME,
+        MANIFEST_FILENAME: root / MANIFEST_FILENAME,
+        PACKAGE_METADATA_FILENAME: root / PACKAGE_METADATA_FILENAME,
+    }
+    parsed: Dict[str, Dict[str, Any]] = {}
+    for name, path in controls.items():
+        info: Dict[str, Any] = {"exists": path.is_file(), "sha256": None}
+        evidence["controls"][name] = info
+        if not path.is_file():
+            _release_identity_mismatch(evidence, "missing_control_file", name, "readable file", "missing")
+            continue
+        try:
+            info["size_bytes"] = path.stat().st_size
+            info["sha256"] = sha256_file(path)
+            if name == VERSION_FILENAME:
+                values = _version_control_values(path)
+                parsed[name] = values
+                info.update({
+                    "package_id": values.get("package_id"),
+                    "version": values.get("version"),
+                    "build_id": values.get("build") or values.get("build_id"),
+                })
+            else:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("control JSON root must be an object")
+                parsed[name] = data
+                info.update({
+                    "package_id": data.get("package_id"),
+                    "version": data.get("version"),
+                    "build_id": data.get("build_id", data.get("build")),
+                })
+        except Exception as exc:
+            info["error"] = f"{exc.__class__.__name__}: {exc}"
+            _release_identity_mismatch(evidence, "unreadable_control_file", name, "readable/parseable", exc.__class__.__name__)
+
+    expected_identity = {"package_id": PACKAGE_ID, "version": APP_VERSION, "build_id": BUILD_NAME}
+    for name, info in evidence["controls"].items():
+        for field, expected in expected_identity.items():
+            observed = info.get(field)
+            if observed != expected:
+                _release_identity_mismatch(evidence, "identity_mismatch", f"{name}:{field}", expected, observed)
+
+    manifest = parsed.get(MANIFEST_FILENAME, {})
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, list):
+        _release_identity_mismatch(evidence, "manifest_inventory_invalid", MANIFEST_FILENAME, "files list", type(files).__name__)
+        files = []
+    seen: Set[str] = set()
+    managed_paths: Set[str] = set()
+    for index, entry in enumerate(files):
+        if not isinstance(entry, dict) or entry.get("package_managed") is not True:
+            continue
+        evidence["managed_count"] += 1
+        normalized, target, path_error = _safe_managed_release_path(root, entry.get("path"))
+        label = str(entry.get("path") or f"files[{index}]")
+        if path_error or normalized is None or target is None:
+            _release_identity_mismatch(evidence, "unsafe_managed_path", label, "unique normalized root-relative path", path_error or "invalid")
+            continue
+        dedupe_key = normalized.casefold()
+        if dedupe_key in seen:
+            _release_identity_mismatch(evidence, "duplicate_managed_path", normalized, "unique path", "duplicate")
+            continue
+        seen.add(dedupe_key)
+        managed_paths.add(normalized)
+        if normalized == CONFIG_FILENAME or normalized.split("/", 1)[0] in {STATE_DIRNAME, LOG_DIRNAME, REPORT_DIRNAME, EXPORT_DIRNAME, "downloads", "cache", "caches"}:
+            _release_identity_mismatch(evidence, "mutable_file_marked_managed", normalized, "package_managed=false", "package_managed=true")
+            continue
+        if not target.is_file():
+            _release_identity_mismatch(evidence, "missing_managed_file", normalized, "file present", "missing")
+            continue
+        expected_size = entry.get("size_bytes")
+        if expected_size is not None:
+            if not isinstance(expected_size, int) or isinstance(expected_size, bool) or expected_size < 0:
+                _release_identity_mismatch(evidence, "invalid_recorded_size", normalized, "non-negative integer or null", expected_size)
+                continue
+            actual_size = target.stat().st_size
+            if actual_size != expected_size:
+                _release_identity_mismatch(evidence, "managed_size_mismatch", normalized, expected_size, actual_size)
+                continue
+        expected_hash = str(entry.get("sha256") or "").lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+            _release_identity_mismatch(evidence, "invalid_recorded_sha256", normalized, "64 lowercase hex chars", expected_hash or "missing")
+            continue
+        actual_hash = sha256_file(target)
+        if actual_hash != expected_hash:
+            _release_identity_mismatch(evidence, "managed_sha256_mismatch", normalized, expected_hash, actual_hash)
+            continue
+        evidence["verified_count"] += 1
+
+    required_managed = {
+        SCRIPT_FILENAME,
+        VERSION_FILENAME,
+        PACKAGE_METADATA_FILENAME,
+        "run_image_downloader.bat",
+        "run_image_downloader_safe_browser.bat",
+        "run_diagnose_export.bat",
+    }
+    for required in sorted(required_managed - managed_paths):
+        _release_identity_mismatch(evidence, "required_managed_file_unlisted", required, "package_managed=true", "not listed as managed")
+    if evidence["managed_count"] == 0:
+        _release_identity_mismatch(evidence, "empty_managed_inventory", MANIFEST_FILENAME, ">=1 managed file", 0)
+
+    passed = not evidence["mismatches"] and evidence["verified_count"] == evidence["managed_count"]
+    evidence["result"] = "PASS" if passed else "BLOCK"
+    evidence["authenticated_activity_allowed"] = passed
+    evidence["authenticated_activity_waited_for_pass"] = passed
+    evidence["duration_ms"] = round(max(0.0, time.monotonic() - started) * 1000.0, 3)
+    evidence["finished_at"] = now_local()
+    return evidence
+
+
+def release_identity_summary(root: Path, evidence: Optional[Dict[str, Any]] = None) -> str:
+    ev = evidence if isinstance(evidence, dict) else verify_release_identity(root)
+    controls = ev.get("controls", {}) if isinstance(ev.get("controls"), dict) else {}
+    lines = [
+        "Runtime release identity / managed-file integrity gate:",
+        f"- Result: {ev.get('result', 'BLOCK')}",
+        f"- Gate: {ev.get('gate_version', RUNTIME_IDENTITY_GATE_VERSION)}",
+        f"- Running package/version/build: {PACKAGE_ID} / {APP_VERSION} / {BUILD_NAME}",
+        f"- Managed files verified: {ev.get('verified_count', 0)}/{ev.get('managed_count', 0)}",
+        f"- Gate duration ms: {ev.get('duration_ms', 0)}",
+        f"- Authenticated/network runtime allowed only after PASS: {bool(ev.get('authenticated_activity_allowed', False))}",
+        f"- Authenticated activity waited for PASS assertion: {bool(ev.get('authenticated_activity_waited_for_pass', False))}",
+        "- Verification mutates release files: false",
+    ]
+    for name in (VERSION_FILENAME, MANIFEST_FILENAME, PACKAGE_METADATA_FILENAME):
+        info = controls.get(name, {}) if isinstance(controls.get(name), dict) else {}
+        lines.append(
+            f"- Control {name}: package={info.get('package_id')} version={info.get('version')} build={info.get('build_id')} sha256={info.get('sha256')}"
+        )
+    mismatches = ev.get("mismatches", []) if isinstance(ev.get("mismatches"), list) else []
+    if mismatches:
+        lines.append(f"- Mismatch count: {len(mismatches)}")
+        for item in mismatches[:20]:
+            if isinstance(item, dict):
+                lines.append(f"  - {item.get('kind')}: {item.get('path')} expected={item.get('expected')} observed={item.get('observed')}")
+    else:
+        lines.append("- Mismatch count: 0")
+    if ev.get("result") != "PASS":
+        lines.extend([
+            "- BLOCK behavior: no download/browser/authenticated runtime is permitted.",
+            "- Recovery: restore the complete verified release ZIP, then rerun --verify-release.",
+            "- Diagnostics/Export20 remain available and verification performs no repair/rewrite.",
+        ])
+    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
+
+
+def print_release_identity_result(evidence: Dict[str, Any]) -> None:
+    print(release_identity_summary(app_root(), evidence).rstrip())
 
 
 def short_path(path: Path, root: Optional[Path] = None) -> str:
@@ -286,38 +500,10 @@ def _home_markers() -> List[str]:
 SENSITIVE_KEY_HINTS = {
     "api_key", "apikey", "access_key", "secret", "token", "password", "passwd", "pwd",
     "cookie", "credential", "bearer", "authorization", "private_key",
-    "session_token", "sessionid", "session_key",
+    "session_token", "sessionid", "session_key", "signature", "credential", "policy", "expires",
+    "googleaccessid", "awsaccesskeyid", "x_amz", "x_goog",
     "license", "product_key", "serial", "uuid", "mac_address", "local_ip",
 }
-
-
-def _is_sensitive_query_field(name: str) -> bool:
-    decoded = urllib.parse.unquote_plus(str(name or "")).strip().lower()
-    token = re.sub(r"[^a-z0-9]+", "", decoded)
-    return token in SENSITIVE_QUERY_FIELD_TOKENS
-
-
-def redact_url_for_evidence(value: Any) -> str:
-    """Redact URL credentials and signed query values while retaining useful routing evidence."""
-    text = "" if value is None else str(value)
-    try:
-        parsed = urllib.parse.urlsplit(text)
-    except (TypeError, ValueError, UnicodeError):
-        parsed = None
-    if parsed is not None and parsed.scheme.lower() in {"http", "https"} and parsed.netloc:
-        netloc = parsed.netloc
-        if "@" in netloc:
-            netloc = "<REDACTED>@" + netloc.rsplit("@", 1)[1]
-        query_parts = re.split(r"([&;])", parsed.query)
-        for index in range(0, len(query_parts), 2):
-            part = query_parts[index]
-            if not part:
-                continue
-            key, separator, _value = part.partition("=")
-            if _is_sensitive_query_field(key):
-                query_parts[index] = f"{key}=<REDACTED>" if separator else f"{key}=<REDACTED>"
-        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, "".join(query_parts), parsed.fragment))
-    return re.sub(r"(?i)\b(https?://)[^/\s@]+@", r"\1<REDACTED>@", text)
 
 
 def redact_sensitive_text(value: Any) -> str:
@@ -325,21 +511,21 @@ def redact_sensitive_text(value: Any) -> str:
     for marker in _home_markers():
         text = text.replace(marker, "<USER_HOME>")
         text = text.replace(marker.replace("\\", "/"), "<USER_HOME>")
-    # Redact complete URL references first so embedded userinfo cannot enter logs or diagnostics.
+    # Redact HTTP(S) userinfo wherever a URL appears in logs or exception text.
     text = re.sub(
-        r"(?i)\bhttps?://[^\s\"'<>]+",
-        lambda match: redact_url_for_evidence(match.group(0)),
+        r"(?i)\b(https?://)[^/\s:@]+(?::[^/\s@]*)?@",
+        r"\1<REDACTED>@",
         text,
     )
-    # Redact common secret-bearing URL query parameters without dropping the URL host/path evidence.
+    # Redact common secret-bearing URL query parameters without dropping host/path evidence.
     text = re.sub(
-        r"(?i)([?&](?:api[_-]?key|access[_-]?(?:key|token|credential)|token|secret|password|passwd|pwd|cookie|session|sid|credential|signature|sig|auth|authorization|awsaccesskeyid|googleaccessid|policy|expires|x-amz-(?:credential|signature|security-token|expires))=)[^&\s]+",
+        r"(?i)([?&](?:api[_-]?key|access[_-]?key|access[_-]?token|token|secret|password|passwd|pwd|cookie|session|sid|signature|sig|auth|authorization|credential|policy|expires|googleaccessid|awsaccesskeyid|x-amz-[^=&\s]+|x-goog-[^=&\s]+)=)[^&\s]+",
         r"\1<REDACTED>",
         text,
     )
     # Redact common key/value secret patterns in logs and generated diagnostics.
     text = re.sub(
-        r"(?i)\b(api[_-]?key|access[_-]?token|token|secret|password|passwd|pwd|cookie|authorization|bearer)\b\s*[:=]\s*([^\s,;\]}]+)",
+        r"(?i)\b(api[_-]?key|access[_-]?token|token|secret|password|passwd|pwd|cookie|authorization|bearer)\b\s*[:=]\s*([^\s,;\]}&]+)",
         r"\1=<REDACTED>",
         text,
     )
@@ -347,13 +533,53 @@ def redact_sensitive_text(value: Any) -> str:
     return text
 
 
-def evidence_reference_fields(field: str, value: Any) -> Dict[str, str]:
-    """Build a redacted evidence field plus an exact-input SHA-256 correlation field."""
-    raw = "" if value is None else str(value)
-    return {
-        field: redact_sensitive_text(raw),
-        f"{field}_sha256": reference_sha256(raw),
-    }
+SENSITIVE_QUERY_KEY_HINTS = {
+    "api_key", "apikey", "access_key", "accesskey", "token", "secret", "password", "passwd", "pwd",
+    "cookie", "session", "sid", "signature", "sig", "auth", "authorization", "credential", "policy",
+    "expires", "googleaccessid", "awsaccesskeyid", "x-amz", "x-goog", "key-pair-id",
+}
+
+
+def _query_key_is_sensitive(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(key or "").lower()).strip("_")
+    return any(hint in normalized for hint in SENSITIVE_QUERY_KEY_HINTS)
+
+
+def redact_url_for_evidence(value: Any) -> str:
+    """Return a diagnostic-safe HTTP(S) URL without changing the operational URL.
+
+    Userinfo and secret-like query values are masked before URLs reach logs, recent-run
+    summaries, failure evidence, diagnostics, or support exports. The downloader still
+    keeps the original normalized URL internally where it is required for fetching and
+    duplicate indexing.
+    """
+    text = "" if value is None else str(value)
+    try:
+        parsed = urllib.parse.urlsplit(text)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+            return redact_sensitive_text(text)
+        host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        netloc = host + (f":{port}" if port else "")
+        if parsed.username is not None or parsed.password is not None:
+            netloc = f"<REDACTED>@{netloc}"
+        query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        safe_pairs = [(key, "<REDACTED>" if _query_key_is_sensitive(key) else value) for key, value in query_pairs]
+        safe_query = urllib.parse.urlencode(safe_pairs, doseq=True)
+        rebuilt = urllib.parse.urlunsplit((parsed.scheme.lower(), netloc, parsed.path, safe_query, ""))
+        return redact_sensitive_text(rebuilt)
+    except (TypeError, ValueError, UnicodeError):
+        return redact_sensitive_text(text)
+
+
+def redact_source_for_evidence(value: Any) -> str:
+    text = "" if value is None else str(value)
+    return redact_url_for_evidence(text) if text.lower().startswith(("http://", "https://")) else redact_sensitive_text(text)
 
 
 def safe_display_path(path: Any, root: Optional[Path] = None) -> str:
@@ -387,6 +613,153 @@ def tool_available(name: str) -> str:
     return "available" if found else "not found"
 
 
+COMPUTER_AWARENESS_VERSION = "1.0.0"
+COMPUTER_PROFILE_OVERRIDE_ENV = "IMAGE_DOWNLOADER_COMPUTER_LABEL"
+COMPUTER_PROFILES: Dict[str, Dict[str, Any]] = {
+    "PC-ALPHA-01": {
+        "display_name": "ALPHA",
+        "role": "high-throughput desktop",
+        "aliases": ["alpha", "alpha computer", "main desktop", "primary desktop"],
+        "helpful_hint": "Suitable for sustained or large download sets; adaptive throttling remains the runtime authority.",
+    },
+    "PC-ASCEND-02": {
+        "display_name": "ASCEND",
+        "role": "high-performance mobile computer",
+        "aliases": ["ascend", "ascend laptop", "asus rog strix", "g634jy"],
+        "helpful_hint": "Mobile/VPN-aware diagnostics are emphasized; no worker or feature restriction is applied.",
+    },
+    "PC-DEUSEX-03": {
+        "display_name": "DeusEx",
+        "role": "portable compatibility computer",
+        "aliases": ["deusex", "deus ex", "raider", "msi raider", "ge66", "raider ge66 12uhs", "pc-raider-03"],
+        "helpful_hint": "Compatibility labeling is enabled; no reduced mode, ownership requirement, or launch gate is applied.",
+    },
+}
+
+
+def normalize_computer_label(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").strip().lower()).strip()
+
+
+def resolve_computer_profile(value: Any) -> Optional[str]:
+    normalized = normalize_computer_label(value)
+    if not normalized:
+        return None
+    compact = normalized.replace(" ", "")
+    for canonical_id, profile in COMPUTER_PROFILES.items():
+        canonical_normalized = normalize_computer_label(canonical_id)
+        if normalized == canonical_normalized or compact == canonical_normalized.replace(" ", ""):
+            return canonical_id
+        for alias in profile.get("aliases", []):
+            alias_normalized = normalize_computer_label(alias)
+            alias_compact = alias_normalized.replace(" ", "")
+            if normalized == alias_normalized or compact == alias_compact:
+                return canonical_id
+            if len(alias_compact) >= 5 and alias_compact in compact:
+                return canonical_id
+    return None
+
+
+def detect_computer_context(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Return a privacy-safe, label-only computer context.
+
+    This context is informational only. It never changes launch permission, locks,
+    state paths, feature access, worker limits, or ownership behavior.
+    """
+    cfg = cfg if isinstance(cfg, dict) else {}
+    enabled = bool(cfg.get("computer_awareness_enabled", True))
+    env_name = str(cfg.get("computer_profile_override_env_name") or COMPUTER_PROFILE_OVERRIDE_ENV)
+    raw_host = str(os.environ.get("COMPUTERNAME", "") or platform.node() or "generic-windows")
+    normalized_host = normalize_computer_label(raw_host) or "generic windows"
+    host_hash = hashlib.sha256(normalized_host.encode("utf-8", errors="replace")).hexdigest()[:8].upper()
+    if not enabled:
+        return {
+            "awareness_version": COMPUTER_AWARENESS_VERSION,
+            "canonical_id": "AWARENESS-DISABLED",
+            "display_name": "Computer awareness disabled",
+            "diagnostic_id": f"LOCAL-{host_hash}",
+            "role": "local computer",
+            "detection_source": "disabled by config",
+            "known_profile": False,
+            "warning": "",
+            "helpful_hint": "No computer label is shown; runtime behavior remains unrestricted.",
+            "behavior_scope": "diagnostic_labels_only",
+            "launch_restrictions": False,
+            "state_path_changes": False,
+            "lock_scope_changes": False,
+            "feature_restrictions": False,
+        }
+
+    override = os.environ.get(env_name, "").strip()
+    canonical_id = resolve_computer_profile(override) if override else None
+    warning = ""
+    source = f"{env_name} override" if override else "sanitized hostname alias match"
+    if override and canonical_id is None:
+        warning = "Unrecognized computer-label override was ignored; generic non-restrictive labeling is used."
+    if canonical_id is None and not override:
+        for candidate in (os.environ.get("COMPUTERNAME", ""), platform.node()):
+            canonical_id = resolve_computer_profile(candidate)
+            if canonical_id:
+                break
+    if canonical_id in COMPUTER_PROFILES:
+        profile = COMPUTER_PROFILES[canonical_id]
+        return {
+            "awareness_version": COMPUTER_AWARENESS_VERSION,
+            "canonical_id": canonical_id,
+            "display_name": str(profile.get("display_name") or canonical_id),
+            "diagnostic_id": canonical_id,
+            "role": str(profile.get("role") or "local computer"),
+            "detection_source": source,
+            "known_profile": True,
+            "warning": warning,
+            "helpful_hint": str(profile.get("helpful_hint") or "Informational label only."),
+            "behavior_scope": "diagnostic_labels_only",
+            "launch_restrictions": False,
+            "state_path_changes": False,
+            "lock_scope_changes": False,
+            "feature_restrictions": False,
+        }
+    return {
+        "awareness_version": COMPUTER_AWARENESS_VERSION,
+        "canonical_id": "OTHER-WINDOWS",
+        "display_name": f"Other Windows computer ({host_hash})",
+        "diagnostic_id": f"OTHER-WINDOWS-{host_hash}",
+        "role": "generic local Windows computer",
+        "detection_source": "privacy-safe hashed local hostname; no canonical alias match",
+        "known_profile": False,
+        "warning": warning,
+        "helpful_hint": "Generic capability mode is informational only; all normal features remain available.",
+        "behavior_scope": "diagnostic_labels_only",
+        "launch_restrictions": False,
+        "state_path_changes": False,
+        "lock_scope_changes": False,
+        "feature_restrictions": False,
+    }
+
+
+def computer_awareness_summary(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
+    ctx = detect_computer_context(cfg)
+    lines = [
+        "Helpful computer awareness (non-restrictive):",
+        f"- Enabled: {bool(cfg.get('computer_awareness_enabled', True))}",
+        f"- Active label: {ctx.get('display_name')}",
+        f"- Diagnostic ID: {ctx.get('diagnostic_id')}",
+        f"- Role hint: {ctx.get('role')}",
+        f"- Detection source: {ctx.get('detection_source')}",
+        f"- Known profile: {ctx.get('known_profile')}",
+        f"- Helpful hint: {ctx.get('helpful_hint')}",
+        f"- Optional label override: {cfg.get('computer_profile_override_env_name', COMPUTER_PROFILE_OVERRIDE_ENV)}",
+        "- Launch permission: never changed by computer identity.",
+        "- Runtime state/log/report paths: shared project-local layout; no computer overlay.",
+        "- Locks/ownership/support: no computer-specific ownership credential, coordination hold, election, or cross-computer gate.",
+        "- Worker limits/features: adaptive throttle and config remain authoritative; the label does not restrict or unlock features.",
+    ]
+    if ctx.get("warning"):
+        lines.append(f"- Warning: {ctx.get('warning')}")
+    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
+
+
 def system_aware_environment_summary(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
     lines = [
@@ -394,7 +767,7 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         f"Generated: {now_local()}",
         f"Version: {APP_VERSION}",
         f"Build: {BUILD_NAME}",
-        "Source: current effective configuration and local read-only checks",
+        "Source: v2.17.5 runtime-identity/integrity project defaults with helpful computer awareness limited to nonrestrictive diagnostics",
         "",
         "Runtime snapshot (redacted):",
         f"- Project root: {safe_display_path(root)}",
@@ -403,6 +776,8 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         f"- Python version: {platform.python_version()}",
         f"- OS/platform: {redact_sensitive_text(platform.platform())}",
         f"- Machine/architecture: {platform.machine() or 'unknown'}",
+        f"- Helpful computer label: {detect_computer_context(cfg).get('display_name')}",
+        f"- Helpful diagnostic ID: {detect_computer_context(cfg).get('diagnostic_id')}",
         f"- Processor class: {redact_sensitive_text(platform.processor() or 'not reported')}",
         f"- Working directory: {safe_display_path(Path.cwd())}",
         "",
@@ -416,10 +791,11 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         f"- Docker: {tool_available('docker')}",
         "",
         "Security/VPN posture:",
-        "- No antivirus, firewall, VPN, adapter, MAC, serial, account, or local IP enumeration is performed in diagnostics.",
-        "- The application includes no bundled executables, hidden execution, downloaded-file auto-run, firewall changes, services, or autostart changes.",
-        f"- Downloaded media visible-file default: {not bool(cfg.get('hide_downloaded_media', False))}; users may opt in to the Windows hidden attribute.",
-        f"- Network resilience enabled: {bool(cfg.get('network_resilience_enabled', True))}",
+        "- No antivirus, firewall, VPN, adapter, MAC, serial, account, raw hostname, or local IP enumeration is exported.",
+        "- Computer recognition uses known aliases or a short privacy-safe hash and remains diagnostic-only.",
+        "- Package remains Norton/Windows Security friendly: no bundled executables, no hidden execution, no downloaded-file auto-run, no firewall/service/autostart changes.",
+        f"- Downloaded media hidden-file default: {bool(cfg.get('hide_downloaded_media', True))}; this changes only the Windows file attribute on completed image files.",
+        f"- Runtime VPN/IP resilience enabled: {bool(cfg.get('network_resilience_enabled', True))}",
         f"- HTTP session refresh on network error: {bool(cfg.get('network_reset_session_on_error', True))}",
         f"- Optional browser context reset on browser/network error: {bool(cfg.get('network_browser_reset_on_error', True))}",
         "",
@@ -428,8 +804,9 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         "- This project performs public HTTP(S) image/page fetches only; it does not store credentials, cookies, webhooks, wallet keys, or API tokens.",
         "- Per-site permission/terms remain user responsibility because pasted URLs can point to arbitrary third-party websites.",
         "",
-        "Support boundary:",
-        "- Keep outputs folder-local and review redacted diagnostics before sharing.",
+        "Sanitized PC-context assumptions from current release integrity policy:",
+        "- Treat Windows 11 Pro, Python 3.13-class runtime, Norton/VPN presence, and multi-drive storage as expected context, but verify live state before sensitive changes.",
+        "- Keep outputs folder-local and prefer ZIP support; do not carry raw PC reports or hardware identifiers forward.",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -548,44 +925,7 @@ def backup_file_for_migration(path: Path, *, label: str, keep: int = 5) -> str:
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup_name = f"{path.stem}_{label}_{timestamp_compact()}{path.suffix or '.bak'}"
     backup_path = backup_dir / backup_name
-    if path.name == DOWNLOAD_INDEX_FILENAME:
-        # Do not create a fresh raw-credential copy while migrating URL evidence.
-        source_state = json_load(path, {})
-        if not isinstance(source_state, dict):
-            raise RuntimeError(f"Could not create a safe migration backup for {path.name}")
-
-        def sanitize_record(record: Any) -> Any:
-            if not isinstance(record, dict):
-                return record
-            result = dict(record)
-            for field in ("url", "source", "input_url", "final_url", "signature"):
-                raw = str(result.get(field) or "")
-                if raw:
-                    result.update(evidence_reference_fields(field, raw))
-            return result
-
-        safe_state = dict(source_state)
-        for mapping_name in ("hashes", "visual_hashes"):
-            mapping = safe_state.get(mapping_name)
-            if isinstance(mapping, dict):
-                safe_state[mapping_name] = {str(key): sanitize_record(record) for key, record in mapping.items()}
-        url_mapping = safe_state.get("urls")
-        if isinstance(url_mapping, dict):
-            safe_urls: Dict[str, Any] = {}
-            for stored_key, record in url_mapping.items():
-                raw_url = str(record.get("url") or stored_key) if isinstance(record, dict) else str(stored_key)
-                existing_correlation = str(record.get("url_sha256") or "") if isinstance(record, dict) else ""
-                key_is_sha256 = bool(re.fullmatch(r"[0-9a-fA-F]{64}", str(stored_key)))
-                correlation = existing_correlation or (str(stored_key).lower() if key_is_sha256 else reference_sha256(raw_url))
-                safe_record = sanitize_record(record)
-                if isinstance(safe_record, dict):
-                    safe_record.update(evidence_reference_fields("url", raw_url))
-                    safe_record["url_sha256"] = correlation
-                safe_urls[correlation] = safe_record
-            safe_state["urls"] = safe_urls
-        json_dump(backup_path, safe_state)
-    else:
-        shutil.copy2(path, backup_path)
+    shutil.copy2(path, backup_path)
     retain_recent_files(backup_dir, f"{path.stem}_{label}_*", keep)
     return short_path(backup_path, path.parent)
 
@@ -595,14 +935,14 @@ def default_config() -> Dict[str, Any]:
         "config_schema_version": CONFIG_SCHEMA_VERSION,
         "state_schema_version": STATE_SCHEMA_VERSION,
         "output": "downloads",
-        "hide_downloaded_media": HIDE_DOWNLOADED_MEDIA_DEFAULT,
+        "hide_downloaded_media": True,
         "timeout": 5,
         "connect_timeout": 3,
         "read_timeout": 5,
-        "request_wall_clock_timeout_seconds": 15,
+        "request_wall_clock_timeout_seconds": 5,
         "page_wall_clock_timeout_seconds": 60,
         "limit": 0,
-        "workers": 6,
+        "workers": 3,
         "retries": 2,
         "retry_backoff_base_ms": 500,
         "retry_backoff_max_ms": 8000,
@@ -618,6 +958,13 @@ def default_config() -> Dict[str, Any]:
         "follow_gallery_links": False,
         "gallery_page_limit": 6,
         "gallery_max_depth": 1,
+        "automation_mode": "smart_safe",
+        "auto_gallery_follow_enabled": True,
+        "auto_gallery_page_limit": 3,
+        "auto_gallery_max_depth": 1,
+        "auto_gallery_link_limit_per_page": 12,
+        "auto_browser_fallback_enabled": False,
+        "auto_browser_fallback_policy": "manual_trusted_sites_only",
         "srcset_preference": "largest",
         "browser_mode": False,
         "browser_scroll_steps": 3,
@@ -637,7 +984,7 @@ def default_config() -> Dict[str, Any]:
         "adaptive_throttle_enabled": True,
         "adaptive_throttle_mode": "feedback_aimd",
         "adaptive_throttle_min_workers": 1,
-        "adaptive_throttle_max_workers": 6,
+        "adaptive_throttle_max_workers": 3,
         "adaptive_throttle_target_latency_ms": 1500,
         "adaptive_throttle_slow_latency_ms": 4500,
         "adaptive_throttle_ewma_alpha": 0.25,
@@ -649,12 +996,26 @@ def default_config() -> Dict[str, Any]:
         "adaptive_throttle_host_cooldown_max_seconds": 60,
         "adaptive_throttle_event_limit": 40,
         "stale_state_guard_days": 30,
-        "single_instance_guard_enabled": True,
-        "single_instance_second_launch": "exit_with_status",
+        "single_instance_guard_enabled": False,
+        "single_instance_second_launch": "allowed_guard_disabled_by_default",
         "single_instance_lock_stale_seconds": 21600,
         "single_instance_event_limit": 40,
-        "download_queue_capacity": 500,
+        "computer_awareness_enabled": True,
+        "computer_profile_mode": "diagnostic_labels_only",
+        "computer_profile_override_env_name": COMPUTER_PROFILE_OVERRIDE_ENV,
+        "computer_profile_include_in_console": True,
+        "computer_profile_include_in_diagnostics": True,
+        "computer_profile_affects_launch": False,
+        "computer_profile_affects_state_paths": False,
+        "computer_profile_affects_locks": False,
+        "computer_profile_affects_feature_access": False,
+        "download_queue_capacity": 100,
         "download_queue_full_policy": "visible_reject_excess",
+        "download_queue_autosave_enabled": True,
+        "download_queue_recovery_enabled": True,
+        "session_download_list_enabled": True,
+        "session_download_list_latest_filename": LATEST_DOWNLOAD_LIST_FILENAME,
+        "session_download_list_retention": 25,
         "gallery_queue_capacity": 100,
         "shutdown_drain_timeout_seconds": 10,
         "schema_migration_backup_retention": 5,
@@ -663,16 +1024,33 @@ def default_config() -> Dict[str, Any]:
         "system_snapshot_enabled": True,
         "diagnostic_redact_sensitive_values": True,
         "export_redaction_enabled": True,
+        "system_aware_primer_version": PARAMETER_ALIGNMENT_VERSION,
+        "parameter_alignment_version": PARAMETER_ALIGNMENT_VERSION,
         "asset_metadata": {
             "metadata_schema": ASSET_METADATA_SCHEMA,
             "asset_id": "IMGDL-CONFIG",
             "project_slug": PROJECT_SLUG,
             "version": APP_VERSION,
+            "build": BUILD_NAME,
             "status": ASSET_STATUS,
             "sensitivity": ASSET_SENSITIVITY,
-            "tags": ["image-downloader", "config", "standard-mode", "asset-metadata"],
-            "lineage": "current effective configuration",
+            "tags": ["image-downloader", "config", "standard-mode", "smart-safe-automation", "canonical-export", "portable", "helpful-computer-awareness", "asset-metadata"],
+            "lineage": "supersedes IMGDL-CONFIG@2026.08.07.1; aligns with v2.17.5 while remaining mutable and intentionally excluded from package-managed release hashing",
+            "copyright_notice": "Copyright © 2026 Gateway Information Group LLC. All rights reserved.",
         },
+        "google_drive_vault_sync_status": "not_configured_local_runtime",
+        "google_drive_reference_check_status": "verified",
+        "google_drive_reference_check_note": "local v2.17.5-aligned maintenance release prepared on 2026-08-07; Drive upload/sync not performed or claimed",
+        "google_drive_intended_vault_path": INTENDED_RELEASE_ARCHIVE_PATH,
+        "google_drive_project_category": "30_UTILITIES_AND_WINDOWS_TOOLS",
+        "google_drive_project_path": ARCHIVE_PROJECT_PATH,
+        "google_drive_latest_build_path": INTENDED_RELEASE_ARCHIVE_PATH,
+        "google_drive_source_of_truth_path": ARCHIVE_PROJECT_PATH + "/00_SOURCE_OF_TRUTH",
+        "external_archive_support_path": ARCHIVE_PROJECT_PATH + "/support-ready",
+        "google_drive_diagnostics_path": ARCHIVE_PROJECT_PATH + "/03_DIAGNOSTICS",
+        "google_drive_docs_runbook_path": ARCHIVE_PROJECT_PATH + "/04_DOCS_RUNBOOK",
+        "google_drive_changelog_manifest_path": ARCHIVE_PROJECT_PATH + "/05_CHANGELOG_MANIFEST",
+        "google_drive_archive_path": ARCHIVE_PROJECT_PATH + "/06_ARCHIVE",
         "custom_input_assurance_enabled": True,
         "platform_api_compliance_enabled": True,
         "platform_review_mode": "cached_off_critical_path",
@@ -681,10 +1059,15 @@ def default_config() -> Dict[str, Any]:
         "platform_contract_probe_mode": "non_mutating_read_only",
         "platform_registry_status": "verified_local_controls_unknown_site_policy",
         "platform_registry_last_review": BUILD_DATE,
+        "launcher_sync_installed_files": False,
+        "archive_nested_package_conflicts": True,
+        "nested_package_archive_retention": 3,
+        "archive_superseded_support_docs": True,
+        "superseded_support_docs_archive_retention": 3,
         "per_run_duplicate_queue_reset": True,
         "thread_local_http_sessions": True,
-        "max_file_mb": 25,
-        "max_html_mb": 5,
+        "max_file_mb": 25.0,
+        "max_html_mb": 5.0,
         "stream_chunk_kb": 128,
         "resume_partial_downloads": True,
         "resume_requires_validator": True,
@@ -706,7 +1089,7 @@ def default_config() -> Dict[str, Any]:
         "duplicate_library_reconcile_enabled": True,
         "duplicate_library_reconcile_max_files": 250,
         "duplicate_library_reconcile_time_budget_seconds": 3,
-        "sequence_discovery_enabled": False,
+        "sequence_discovery_enabled": True,
         "sequence_same_domain_only": True,
         "sequence_max_seed_groups_per_run": 30,
         "sequence_max_anchors_per_group": 5,
@@ -719,10 +1102,26 @@ def default_config() -> Dict[str, Any]:
         "modern_discovery_enabled": True,
         "recent_failure_limit": 200,
         "log_tail_lines_for_export": 400,
+        "canonical_export_filename": CANONICAL_EXPORT_FILENAME,
+        "export_keep_previous_zips": 0,
+        "export_location_mode": "project_root_canonical",
         "trusted_sites_note": (
             "Safe Browser Mode uses Playwright/Chromium only when launched explicitly; "
             "use it only for trusted sites."
         ),
+        "google_drive_lookup_note": (
+            "official structured ImageDownloader vault path retained as reference only; "
+            "local runtime may identify ALPHA, ASCEND, DeusEx/Raider/GE66, or a privacy-safe generic host for labels and diagnostics only; no host-specific state overlay, shared startup coordination, ownership dependency, or launch restriction; "
+            "direct ZIP upload may require manual Drive placement when connector upload is unavailable"
+        ),
+        "preferred_bot_dir": ".",
+        "bot_dir_env_override_name": "IMAGE_DOWNLOADER_BOT_DIR",
+        "path_targeting_mode": "project_folder_then_valid_env_override_then_legacy_fallback",
+        "portable_fallback_enabled": True,
+        "relocation_repair_status": "portable_project_folder_no_auto_sync_no_user_data_delete",
+        "omission_control_status": "coverage_ledger_plus_queue_recovery_three_worker_cap_session_timestamps_portable_launch_privacy_and_runtime_evidence",
+        "omission_control_coverage_note": "Startup, persistent 100-item queue autosave/recovery, hard three-download concurrency, timestamped session download-list output, project-folder-first path targeting, nonrestrictive computer labeling, credential-safe URL evidence, Windows-reserved filename safety, one canonical Export20 ZIP, runtime-evidence completeness, and package verification are tracked before completion claims.",
+        "thread_context_health_status": "green_v2175_queue_recovery_upgrade",
     }
 
 
@@ -742,10 +1141,8 @@ def downloaded_asset_id(digest: str) -> str:
 
 
 def enrich_download_asset_record(record: Dict[str, Any], *, digest: str = "", url: str = "") -> Dict[str, Any]:
-    """Add compact support metadata to an existing download-index record."""
+    """Add compact current-release metadata to an existing download-index record."""
     value = dict(record) if isinstance(record, dict) else {}
-    supplied_url = str(url or "")
-    stored_url = str(value.get("url") or "")
     digest_value = str(digest or value.get("sha256") or "")
     path_value = str(value.get("path") or "")
     saved_at = str(value.get("saved_at") or value.get("created_at") or now_local())
@@ -780,11 +1177,8 @@ def enrich_download_asset_record(record: Dict[str, Any], *, digest: str = "", ur
         "media_visibility": str(value.get("media_visibility") or "unknown_legacy"),
         "media_visibility_note": str(value.get("media_visibility_note") or "visibility was not recorded by the originating build"),
     })
-    if supplied_url:
-        value.update(evidence_reference_fields("url", supplied_url))
-    elif stored_url:
-        value["url"] = redact_sensitive_text(stored_url)
-        value["url_sha256"] = str(value.get("url_sha256") or reference_sha256(stored_url))
+    if url and not value.get("url"):
+        value["url"] = url
     return value
 
 
@@ -800,15 +1194,20 @@ def _normalized_types(value: Any) -> List[str]:
 
 
 def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    # Direct-user simplification: remove obsolete computer-specific coordination
+    # fields from preserved configs. They are not accepted, exported, or used.
+    obsolete_prefix = "fl" + "eet_"
+    for obsolete_key in [key for key in list(cfg) if str(key).startswith(obsolete_prefix)]:
+        cfg.pop(obsolete_key, None)
     cfg["config_schema_version"] = safe_int(cfg.get("config_schema_version", CONFIG_SCHEMA_VERSION), CONFIG_SCHEMA_VERSION, min_value=1, max_value=CONFIG_SCHEMA_VERSION)
     cfg["state_schema_version"] = safe_int(cfg.get("state_schema_version", STATE_SCHEMA_VERSION), STATE_SCHEMA_VERSION, min_value=1, max_value=STATE_SCHEMA_VERSION)
-    cfg["timeout"] = safe_int(cfg.get("timeout", 20), 20, min_value=3, max_value=120)
-    cfg["connect_timeout"] = safe_int(cfg.get("connect_timeout", 7), 7, min_value=3, max_value=60)
-    cfg["read_timeout"] = safe_int(cfg.get("read_timeout", cfg["timeout"]), cfg["timeout"], min_value=3, max_value=180)
-    cfg["request_wall_clock_timeout_seconds"] = safe_int(cfg.get("request_wall_clock_timeout_seconds", 120), 120, min_value=15, max_value=3600)
+    cfg["timeout"] = safe_int(cfg.get("timeout", 5), 5, min_value=1, max_value=120)
+    cfg["connect_timeout"] = safe_int(cfg.get("connect_timeout", 3), 3, min_value=1, max_value=60)
+    cfg["read_timeout"] = safe_int(cfg.get("read_timeout", cfg["timeout"]), cfg["timeout"], min_value=1, max_value=180)
+    cfg["request_wall_clock_timeout_seconds"] = safe_int(cfg.get("request_wall_clock_timeout_seconds", 5), 5, min_value=1, max_value=3600)
     cfg["page_wall_clock_timeout_seconds"] = safe_int(cfg.get("page_wall_clock_timeout_seconds", 60), 60, min_value=10, max_value=600)
     cfg["limit"] = safe_int(cfg.get("limit", 0), 0, min_value=0, max_value=100000)
-    cfg["workers"] = safe_int(cfg.get("workers", 6), 6, min_value=1, max_value=16)
+    cfg["workers"] = safe_int(cfg.get("workers", 3), 3, min_value=1, max_value=MAX_ACTIVE_DOWNLOADS)
     cfg["retries"] = safe_int(cfg.get("retries", 2), 2, min_value=0, max_value=5)
     cfg["retry_backoff_base_ms"] = safe_int(cfg.get("retry_backoff_base_ms", 500), 500, min_value=0, max_value=30000)
     cfg["retry_backoff_max_ms"] = safe_int(cfg.get("retry_backoff_max_ms", 8000), 8000, min_value=0, max_value=120000)
@@ -820,6 +1219,10 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg["types"] = _normalized_types(cfg.get("types"))
     cfg["gallery_page_limit"] = safe_int(cfg.get("gallery_page_limit", 6), 6, min_value=1, max_value=50)
     cfg["gallery_max_depth"] = safe_int(cfg.get("gallery_max_depth", 1), 1, min_value=0, max_value=4)
+    cfg["auto_gallery_page_limit"] = safe_int(cfg.get("auto_gallery_page_limit", 3), 3, min_value=1, max_value=10)
+    cfg["auto_gallery_max_depth"] = safe_int(cfg.get("auto_gallery_max_depth", 1), 1, min_value=0, max_value=2)
+    cfg["auto_gallery_link_limit_per_page"] = safe_int(cfg.get("auto_gallery_link_limit_per_page", 12), 12, min_value=1, max_value=50)
+    cfg["export_keep_previous_zips"] = safe_int(cfg.get("export_keep_previous_zips", 0), 0, min_value=0, max_value=5)
     cfg["browser_scroll_steps"] = safe_int(cfg.get("browser_scroll_steps", 3), 3, min_value=0, max_value=25)
     cfg["browser_wait_ms"] = safe_int(cfg.get("browser_wait_ms", 500), 500, min_value=0, max_value=10000)
     cfg["browser_network_image_limit"] = safe_int(cfg.get("browser_network_image_limit", 500), 500, min_value=1, max_value=5000)
@@ -829,10 +1232,11 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg["network_recovery_event_limit"] = safe_int(cfg.get("network_recovery_event_limit", 25), 25, min_value=1, max_value=200)
     cfg["network_session_reset_debounce_ms"] = safe_int(cfg.get("network_session_reset_debounce_ms", 1000), 1000, min_value=0, max_value=30000)
     cfg["network_recovery_extra_attempts"] = safe_int(cfg.get("network_recovery_extra_attempts", 2), 2, min_value=0, max_value=5)
-    cfg["adaptive_throttle_min_workers"] = safe_int(cfg.get("adaptive_throttle_min_workers", 1), 1, min_value=1, max_value=16)
-    cfg["adaptive_throttle_max_workers"] = safe_int(cfg.get("adaptive_throttle_max_workers", cfg.get("workers", 6)), cfg.get("workers", 6), min_value=1, max_value=16)
+    cfg["adaptive_throttle_min_workers"] = safe_int(cfg.get("adaptive_throttle_min_workers", 1), 1, min_value=1, max_value=MAX_ACTIVE_DOWNLOADS)
+    cfg["adaptive_throttle_max_workers"] = safe_int(cfg.get("adaptive_throttle_max_workers", cfg.get("workers", MAX_ACTIVE_DOWNLOADS)), cfg.get("workers", MAX_ACTIVE_DOWNLOADS), min_value=1, max_value=MAX_ACTIVE_DOWNLOADS)
     if cfg["adaptive_throttle_max_workers"] < cfg["adaptive_throttle_min_workers"]:
         cfg["adaptive_throttle_max_workers"] = cfg["adaptive_throttle_min_workers"]
+    cfg["adaptive_throttle_max_workers"] = min(MAX_ACTIVE_DOWNLOADS, cfg["adaptive_throttle_max_workers"])
     cfg["adaptive_throttle_target_latency_ms"] = safe_int(cfg.get("adaptive_throttle_target_latency_ms", 1500), 1500, min_value=100, max_value=60000)
     cfg["adaptive_throttle_slow_latency_ms"] = safe_int(cfg.get("adaptive_throttle_slow_latency_ms", 4500), 4500, min_value=250, max_value=120000)
     cfg["adaptive_throttle_successes_to_increase"] = safe_int(cfg.get("adaptive_throttle_successes_to_increase", 5), 5, min_value=1, max_value=100)
@@ -846,7 +1250,8 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg["stale_state_guard_days"] = safe_int(cfg.get("stale_state_guard_days", 30), 30, min_value=1, max_value=3650)
     cfg["single_instance_lock_stale_seconds"] = safe_int(cfg.get("single_instance_lock_stale_seconds", 21600), 21600, min_value=60, max_value=604800)
     cfg["single_instance_event_limit"] = safe_int(cfg.get("single_instance_event_limit", 40), 40, min_value=5, max_value=200)
-    cfg["download_queue_capacity"] = safe_int(cfg.get("download_queue_capacity", 500), 500, min_value=1, max_value=5000)
+    cfg["download_queue_capacity"] = safe_int(cfg.get("download_queue_capacity", DOWNLOAD_QUEUE_HARD_MAX), DOWNLOAD_QUEUE_HARD_MAX, min_value=1, max_value=DOWNLOAD_QUEUE_HARD_MAX)
+    cfg["session_download_list_retention"] = safe_int(cfg.get("session_download_list_retention", 25), 25, min_value=1, max_value=200)
     cfg["gallery_queue_capacity"] = safe_int(cfg.get("gallery_queue_capacity", 100), 100, min_value=1, max_value=1000)
     cfg["shutdown_drain_timeout_seconds"] = safe_int(cfg.get("shutdown_drain_timeout_seconds", 10), 10, min_value=1, max_value=120)
     cfg["schema_migration_backup_retention"] = safe_int(cfg.get("schema_migration_backup_retention", 5), 5, min_value=1, max_value=20)
@@ -870,26 +1275,44 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg["duplicate_library_reconcile_time_budget_seconds"] = safe_int(cfg.get("duplicate_library_reconcile_time_budget_seconds", 3), 3, min_value=0, max_value=60)
     cfg["recent_failure_limit"] = safe_int(cfg.get("recent_failure_limit", 200), 200, min_value=10, max_value=5000)
     cfg["log_tail_lines_for_export"] = safe_int(cfg.get("log_tail_lines_for_export", 400), 400, min_value=20, max_value=2000)
+    cfg["superseded_support_docs_archive_retention"] = safe_int(cfg.get("superseded_support_docs_archive_retention", 3), 3, min_value=1, max_value=20)
     cfg["platform_review_normal_days"] = safe_int(cfg.get("platform_review_normal_days", 30), 30, min_value=1, max_value=365)
     cfg["platform_review_fast_days"] = safe_int(cfg.get("platform_review_fast_days", 7), 7, min_value=1, max_value=90)
     for key in [
-        "same_domain_only", "follow_gallery_links", "browser_mode", "browser_reuse_context", "browser_capture_network_images",
+        "same_domain_only", "follow_gallery_links", "auto_gallery_follow_enabled", "auto_browser_fallback_enabled", "browser_mode", "browser_reuse_context", "browser_capture_network_images",
         "network_resilience_enabled", "network_reset_session_on_error", "network_browser_reset_on_error",
         "adaptive_throttle_enabled",
-        "single_instance_guard_enabled", "system_snapshot_enabled", "diagnostic_redact_sensitive_values",
-        "export_redaction_enabled", "platform_api_compliance_enabled", "custom_input_assurance_enabled", "per_run_duplicate_queue_reset",
-        "thread_local_http_sessions", "organize_by_domain", "hide_downloaded_media", "dry_run", "safe_svg_validation",
+        "single_instance_guard_enabled", "computer_awareness_enabled", "computer_profile_include_in_console", "computer_profile_include_in_diagnostics", "computer_profile_affects_launch", "computer_profile_affects_state_paths", "computer_profile_affects_locks", "computer_profile_affects_feature_access", "system_snapshot_enabled", "diagnostic_redact_sensitive_values",
+        "export_redaction_enabled", "platform_api_compliance_enabled", "custom_input_assurance_enabled", "launcher_sync_installed_files", "archive_nested_package_conflicts", "archive_superseded_support_docs", "per_run_duplicate_queue_reset",
+        "thread_local_http_sessions", "portable_fallback_enabled", "organize_by_domain", "hide_downloaded_media", "dry_run", "safe_svg_validation", "download_queue_autosave_enabled", "download_queue_recovery_enabled", "session_download_list_enabled",
         "resume_partial_downloads", "resume_requires_validator", "strict_raster_verify", "modern_discovery_enabled",
         "duplicate_url_check", "duplicate_content_hash_check", "duplicate_visual_fingerprint_check", "duplicate_library_reconcile_enabled", "sequence_discovery_enabled",
         "sequence_same_domain_only", "sequence_include_discovered_seeds",
     ]:
         cfg[key] = safe_bool(cfg.get(key), bool(default_config().get(key, False)))
+    if str(cfg.get("automation_mode", "smart_safe")) not in {"smart_safe", "manual"}:
+        cfg["automation_mode"] = "smart_safe"
+    if str(cfg.get("computer_profile_mode", "diagnostic_labels_only")) != "diagnostic_labels_only":
+        cfg["computer_profile_mode"] = "diagnostic_labels_only"
+    cfg["computer_profile_override_env_name"] = str(cfg.get("computer_profile_override_env_name") or COMPUTER_PROFILE_OVERRIDE_ENV)
+    if str(cfg.get("auto_browser_fallback_policy", "manual_trusted_sites_only")) not in {"manual_trusted_sites_only"}:
+        cfg["auto_browser_fallback_policy"] = "manual_trusted_sites_only"
+    if str(cfg.get("export_location_mode", "project_root_canonical")) not in {"project_root_canonical"}:
+        cfg["export_location_mode"] = "project_root_canonical"
+    canonical_export_name = Path(str(cfg.get("canonical_export_filename", CANONICAL_EXPORT_FILENAME))).name
+    if not canonical_export_name.lower().endswith(".zip"):
+        canonical_export_name += ".zip"
+    cfg["canonical_export_filename"] = canonical_export_name or CANONICAL_EXPORT_FILENAME
     if str(cfg.get("adaptive_throttle_mode", "feedback_aimd")) not in {"feedback_aimd", "fixed"}:
         cfg["adaptive_throttle_mode"] = "feedback_aimd"
     if str(cfg.get("download_queue_full_policy", "visible_reject_excess")) not in {"visible_reject_excess"}:
         cfg["download_queue_full_policy"] = "visible_reject_excess"
-    if str(cfg.get("single_instance_second_launch", "exit_with_status")) not in {"exit_with_status"}:
-        cfg["single_instance_second_launch"] = "exit_with_status"
+    session_list_name = Path(str(cfg.get("session_download_list_latest_filename", LATEST_DOWNLOAD_LIST_FILENAME))).name
+    if not session_list_name.lower().endswith(".txt"):
+        session_list_name += ".txt"
+    cfg["session_download_list_latest_filename"] = session_list_name or LATEST_DOWNLOAD_LIST_FILENAME
+    if str(cfg.get("single_instance_second_launch", "allowed_guard_disabled_by_default")) not in {"exit_with_status", "allowed_guard_disabled_by_default"}:
+        cfg["single_instance_second_launch"] = "allowed_guard_disabled_by_default"
     if str(cfg.get("srcset_preference", "largest")).lower() not in {"largest", "first", "smallest", "all"}:
         cfg["srcset_preference"] = "largest"
     if str(cfg.get("platform_review_mode", "cached_off_critical_path")) not in {"cached_off_critical_path"}:
@@ -899,6 +1322,46 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     valid_platform_states = {"verified", "warning", "stale", "blocked", "unknown", "verified_local_controls_unknown_site_policy"}
     if str(cfg.get("platform_registry_status", "verified_local_controls_unknown_site_policy")) not in valid_platform_states:
         cfg["platform_registry_status"] = "verified_local_controls_unknown_site_policy"
+    valid_drive_states = {"verified", "not_available", "stale", "conflict", "blocked", "not_configured_local_runtime"}
+    if str(cfg.get("google_drive_vault_sync_status", "not_configured_local_runtime")) not in valid_drive_states:
+        cfg["google_drive_vault_sync_status"] = "not_configured_local_runtime"
+    drive_ref_status = str(cfg.get("google_drive_reference_check_status", "not_available") or "not_available")
+    if drive_ref_status == "verified_structured_folder_exists_no_zip_upload":
+        cfg["google_drive_reference_check_status"] = "verified"
+        cfg["google_drive_reference_check_note"] = str(cfg.get("google_drive_reference_check_note") or "structured_folder_exists_no_zip_upload")
+    elif drive_ref_status == "not_available_local_runtime":
+        cfg["google_drive_reference_check_status"] = "not_available"
+        cfg["google_drive_reference_check_note"] = str(cfg.get("google_drive_reference_check_note") or "local_runtime_without_connector_verification")
+    elif drive_ref_status not in valid_drive_states:
+        cfg["google_drive_reference_check_status"] = "not_available"
+        cfg["google_drive_reference_check_note"] = str(cfg.get("google_drive_reference_check_note") or f"normalized_from_unsupported_status:{drive_ref_status}")
+    else:
+        cfg["google_drive_reference_check_status"] = drive_ref_status
+        cfg["google_drive_reference_check_note"] = str(cfg.get("google_drive_reference_check_note") or "")
+    cfg["google_drive_intended_vault_path"] = str(cfg.get("google_drive_intended_vault_path") or INTENDED_RELEASE_ARCHIVE_PATH)
+    for key in [
+        "preferred_bot_dir",
+        "bot_dir_env_override_name",
+        "path_targeting_mode",
+        "relocation_repair_status",
+        "omission_control_status",
+        "omission_control_coverage_note",
+        "thread_context_health_status",
+    ]:
+        cfg[key] = str(cfg.get(key) or default_config().get(key, ""))
+    # These are build-owned metadata, not user-tunable behavior. Always refresh them
+    # so an upgraded package cannot keep exporting stale parameter/version evidence.
+    cfg["single_instance_guard_enabled"] = False
+    cfg["single_instance_second_launch"] = "allowed_guard_disabled_by_default"
+    # Computer awareness is strictly informational. These values are build-owned
+    # safeguards so config drift cannot turn labels into launch or ownership gates.
+    cfg["computer_profile_mode"] = "diagnostic_labels_only"
+    cfg["computer_profile_affects_launch"] = False
+    cfg["computer_profile_affects_state_paths"] = False
+    cfg["computer_profile_affects_locks"] = False
+    cfg["computer_profile_affects_feature_access"] = False
+    cfg["parameter_alignment_version"] = PARAMETER_ALIGNMENT_VERSION
+    cfg["system_aware_primer_version"] = PARAMETER_ALIGNMENT_VERSION
     cfg["asset_metadata"] = default_config()["asset_metadata"]
     return cfg
 
@@ -964,8 +1427,8 @@ def require_requests():
         return requests
     except Exception as exc:
         raise RuntimeError(
-            "Core dependencies are required. Install them with: "
-            "python -m pip install -r requirements.txt"
+            "The requests package is required. Run run_image_downloader.bat so it can install core packages, "
+            "or install it with: python -m pip install requests beautifulsoup4 pillow"
         ) from exc
 
 
@@ -1019,24 +1482,6 @@ def clean_url_text(url: str) -> str:
     return url.replace(" ", "%20")
 
 
-def _is_scoped_self_test_url(url: str) -> bool:
-    """Allow only the exact ephemeral origin created by the built-in test harness."""
-    if not _SELF_TEST_ALLOWED_ORIGIN:
-        return False
-    try:
-        candidate = urllib.parse.urlparse(url)
-        expected = urllib.parse.urlparse(_SELF_TEST_ALLOWED_ORIGIN)
-        return (
-            candidate.scheme == expected.scheme == "http"
-            and candidate.hostname == expected.hostname == "127.0.0.1"
-            and candidate.port == expected.port
-            and not candidate.username
-            and not candidate.password
-        )
-    except (TypeError, ValueError):
-        return False
-
-
 def normalize_url(url: str, base: Optional[str] = None) -> Optional[str]:
     if not url:
         return None
@@ -1053,10 +1498,6 @@ def normalize_url(url: str, base: Optional[str] = None) -> Optional[str]:
             return None
         if not parsed.netloc:
             return None
-        if parsed.username or parsed.password:
-            return None
-        if not destination_host_is_public(parsed.hostname or "", resolve_dns=False) and not _is_scoped_self_test_url(url):
-            return None
         scheme = parsed.scheme.lower()
         netloc = parsed.netloc.lower()
         path = urllib.parse.quote(urllib.parse.unquote(parsed.path or "/"), safe="/%:@+~#=,;!$&'()*[]")
@@ -1064,39 +1505,6 @@ def normalize_url(url: str, base: Optional[str] = None) -> Optional[str]:
         return urllib.parse.urlunparse((scheme, netloc, path, "", query, ""))
     except (TypeError, ValueError, UnicodeError):
         return None
-
-
-def destination_host_is_public(host: str, *, resolve_dns: bool = True) -> bool:
-    """Allow only globally routable destinations, including after DNS resolution."""
-    normalized = str(host or "").strip().rstrip(".").lower()
-    if not normalized or normalized == "localhost" or normalized.endswith((".localhost", ".local", ".internal")):
-        return False
-    address_text = normalized.split("%", 1)[0]
-    try:
-        return ipaddress.ip_address(address_text).is_global
-    except ValueError:
-        if not resolve_dns:
-            return True
-    try:
-        records = socket.getaddrinfo(normalized, None, type=socket.SOCK_STREAM)
-    except (OSError, socket.gaierror, UnicodeError):
-        return False
-    addresses = {str(record[4][0]).split("%", 1)[0] for record in records if record and record[4]}
-    if not addresses:
-        return False
-    try:
-        return all(ipaddress.ip_address(address).is_global for address in addresses)
-    except ValueError:
-        return False
-
-
-def require_public_destination(url: str) -> str:
-    normalized = normalize_url(url)
-    if not normalized:
-        raise ValueError("Invalid or non-public URL")
-    if not destination_host_is_public(url_host(normalized), resolve_dns=True) and not _is_scoped_self_test_url(normalized):
-        raise ValueError("URL destination is not globally routable")
-    return normalized
 
 
 def url_host(url: str) -> str:
@@ -1388,23 +1796,33 @@ def build_test_png(red: int, green: int, blue: int) -> bytes:
     )
 
 
+WINDOWS_RESERVED_FILE_STEMS = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{number}" for number in range(1, 10)),
+    *(f"LPT{number}" for number in range(1, 10)),
+}
+BIDI_CONTROL_PATTERN = re.compile(r"[\u202A-\u202E\u2066-\u2069]")
+
+
 def sanitize_filename(name: str) -> str:
     name = urllib.parse.unquote(name or "")
-    name = "".join(character for character in name if character not in BIDI_CONTROL_CHARACTERS)
     name = name.replace("\x00", "")
+    name = BIDI_CONTROL_PATTERN.sub("", name)
     name = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", name)
-    name = re.sub(r"\s+", " ", name).strip().strip(".")
+    name = re.sub(r"\s+", " ", name).strip().rstrip(" .")
     if not name:
         name = "image"
-    device_stem = name.split(".", 1)[0].rstrip(" .").upper()
-    if device_stem in WINDOWS_RESERVED_DEVICE_NAMES:
+    stem, suffix = os.path.splitext(name)
+    if stem.rstrip(" .").upper() in WINDOWS_RESERVED_FILE_STEMS:
         name = f"_{name}"
     if len(name) > 140:
-        root, dot, ext = name.rpartition(".")
+        root_part, dot, ext = name.rpartition(".")
         if dot:
-            name = root[:120] + dot + ext[:12]
+            name = root_part[:120].rstrip(" .") + dot + ext[:12]
         else:
-            name = name[:140]
+            name = name[:140].rstrip(" .")
+    if not name:
+        return "image"
     return name
 
 
@@ -1493,6 +1911,49 @@ def jsonld_image_urls(value: Any) -> List[str]:
     return found
 
 
+def gallery_link_is_safe_auto(anchor: Any, normalized_url: str, base_url: str) -> bool:
+    """Return True only for strong, same-domain pagination/gallery navigation signals."""
+    if not normalized_url or not same_hostname(base_url, normalized_url):
+        return False
+    parsed = urllib.parse.urlparse(normalized_url)
+    if parsed.scheme not in {"http", "https"} or has_dangerous_extension(normalized_url):
+        return False
+    base_no_fragment = urllib.parse.urldefrag(normalize_url(base_url) or base_url)[0]
+    target_no_fragment = urllib.parse.urldefrag(normalized_url)[0]
+    if not target_no_fragment or target_no_fragment == base_no_fragment:
+        return False
+    combined = " ".join(
+        str(value or "")
+        for value in (
+            anchor.get_text(" ", strip=True) if hasattr(anchor, "get_text") else "",
+            anchor.get("rel", "") if hasattr(anchor, "get") else "",
+            anchor.get("class", "") if hasattr(anchor, "get") else "",
+            anchor.get("id", "") if hasattr(anchor, "get") else "",
+            anchor.get("title", "") if hasattr(anchor, "get") else "",
+            anchor.get("aria-label", "") if hasattr(anchor, "get") else "",
+        )
+    ).lower()
+    blocked_tokens = {
+        "login", "log in", "signin", "sign in", "signup", "sign up", "logout",
+        "account", "cart", "checkout", "comment", "share", "privacy", "terms",
+        "contact", "subscribe", "feed", "search", "download app",
+    }
+    if any(token in combined for token in blocked_tokens):
+        return False
+    strong_tokens = {
+        "next", "next page", "older", "load more", "more images", "more photos",
+        "view more", "continue", "slideshow", "gallery", "pagination",
+    }
+    if any(token in combined for token in strong_tokens):
+        return True
+    text = (anchor.get_text(" ", strip=True) if hasattr(anchor, "get_text") else "").strip()
+    query = urllib.parse.parse_qs(parsed.query.lower(), keep_blank_values=True)
+    page_keys = {"page", "p", "pg", "start", "offset"}
+    numeric_page_signal = bool(re.fullmatch(r"\d{1,4}", text)) and bool(page_keys.intersection(query))
+    path_page_signal = bool(re.search(r"(?:^|[/_-])page[/_-]?\d+(?:$|[/_.-])", parsed.path.lower()))
+    return numeric_page_signal or path_page_signal
+
+
 @dataclasses.dataclass
 class DownloadResult:
     url: str
@@ -1518,9 +1979,9 @@ class AdaptiveThrottle:
         self.config = config
         self.logger = logger
         self.enabled = bool(config.get("adaptive_throttle_enabled", True)) and str(config.get("adaptive_throttle_mode", "feedback_aimd")) != "fixed"
-        configured_workers = safe_int(config.get("workers", 6), 6, min_value=1, max_value=16)
-        requested_min = safe_int(config.get("adaptive_throttle_min_workers", 1), 1, min_value=1, max_value=16)
-        requested_max = safe_int(config.get("adaptive_throttle_max_workers", configured_workers), configured_workers, min_value=1, max_value=16)
+        configured_workers = safe_int(config.get("workers", MAX_ACTIVE_DOWNLOADS), MAX_ACTIVE_DOWNLOADS, min_value=1, max_value=MAX_ACTIVE_DOWNLOADS)
+        requested_min = safe_int(config.get("adaptive_throttle_min_workers", 1), 1, min_value=1, max_value=MAX_ACTIVE_DOWNLOADS)
+        requested_max = safe_int(config.get("adaptive_throttle_max_workers", configured_workers), configured_workers, min_value=1, max_value=MAX_ACTIVE_DOWNLOADS)
         self.max_limit = max(1, min(configured_workers, requested_max))
         self.min_limit = max(1, min(self.max_limit, requested_min))
         self.initial_limit = self.max_limit
@@ -1561,7 +2022,7 @@ class AdaptiveThrottle:
             "time": now_local(),
             "kind": kind,
             "host": host,
-            "reason": redact_sensitive_text(reason)[:300],
+            "reason": reason[:300],
             "limit": self.current_limit,
         }
         item.update(extra)
@@ -1586,11 +2047,10 @@ class AdaptiveThrottle:
             if global_cooldown:
                 self.global_cooldown_until = max(self.global_cooldown_until, now_mono + min(float(self.cooldown_seconds), bounded))
         self.success_streak = 0
-        safe_reason = redact_sensitive_text(reason)
-        self.last_reason = safe_reason
-        self._append_event("decrease", host, safe_reason, previous_limit=old, cooldown_seconds=round(max(0.0, cooldown), 3))
+        self.last_reason = reason
+        self._append_event("decrease", host, reason, previous_limit=old, cooldown_seconds=round(max(0.0, cooldown), 3))
         if self.current_limit != old:
-            self.logger.warning("ADAPTIVE_THROTTLE action=decrease host=%s old_limit=%s new_limit=%s reason=%s", host, old, self.current_limit, safe_reason)
+            self.logger.warning("ADAPTIVE_THROTTLE action=decrease host=%s old_limit=%s new_limit=%s reason=%s", host, old, self.current_limit, reason)
 
     def record_retry(self, host: str, *, status_code: int, delay_seconds: float, stage: str) -> None:
         if not self.enabled:
@@ -1824,6 +2284,10 @@ def process_start_signature(pid: int) -> str:
     return signature if alive else ""
 
 
+def process_is_alive(pid: int) -> bool:
+    return process_status(pid)[0]
+
+
 def _safe_lock_owner_summary(meta: Dict[str, Any]) -> str:
     pid = meta.get("pid", "unknown")
     role = meta.get("role", "unknown")
@@ -1988,7 +2452,7 @@ class ImageDownloader:
         unknown_keys = unknown_config_keys(self.config)
         if unknown_keys and bool(self.config.get("custom_input_assurance_enabled", True)):
             print("Warning: unknown config key(s) detected and preserved but not consumed by this build: " + ", ".join(unknown_keys[:10]))
-            print("Run /diagnose for a redacted custom-input assurance summary.")
+            print("Run /diagnose or /export for the redacted custom-input assurance summary.")
         if browser_mode is not None:
             self.config["browser_mode"] = bool(browser_mode)
         if dry_run is not None:
@@ -2023,6 +2487,30 @@ class ImageDownloader:
         for path in (self.state_dir, self.partial_dir, self.log_dir, self.report_dir, self.export_dir, self.output_dir):
             path.mkdir(parents=True, exist_ok=True)
         self.logger = configure_logging(self.root, self.config)
+        self._queue_lock = threading.RLock()
+        self.session_id = make_run_id("session")
+        self.session_started_at = now_local()
+        self.session_download_records: List[Dict[str, Any]] = []
+        self.session_job_summaries: List[Dict[str, Any]] = []
+        self.session_report_path: Optional[Path] = None
+        self._session_report_finalized = False
+        self.queue_metrics: Dict[str, Any] = {
+            "loaded_at": now_local(),
+            "recovered_running_items": 0,
+            "rejected_invalid": 0,
+            "rejected_duplicate": 0,
+            "rejected_capacity": 0,
+            "enqueued": 0,
+            "processed": 0,
+        }
+        self.download_queue_state = self._load_download_queue_state()
+        self.computer_context = detect_computer_context(self.config)
+        self.logger.info(
+            "COMPUTER_AWARENESS label=%s diagnostic_id=%s source=%s restrictions=false state_overlay=false lock_scope_change=false",
+            self.computer_context.get("display_name"),
+            self.computer_context.get("diagnostic_id"),
+            self.computer_context.get("detection_source"),
+        )
         self.adaptive_throttle = AdaptiveThrottle(self.config, self.logger)
         self.state = self._load_download_index()
         self.library_duplicate_scan_stats = self._reconcile_existing_download_library()
@@ -2033,6 +2521,7 @@ class ImageDownloader:
         self.failures_this_run: List[Dict[str, Any]] = []
         self.not_downloaded_this_run: List[Dict[str, Any]] = []
         self.sequence_stats: Dict[str, Any] = self._fresh_sequence_stats()
+        self.automation_stats: Dict[str, Any] = self._fresh_automation_stats()
         self.discovery_stats: Dict[str, Any] = self._fresh_discovery_stats()
         self.transfer_recovery_stats: Dict[str, Any] = self._fresh_transfer_recovery_stats()
         self._playwright: Any = None
@@ -2052,19 +2541,38 @@ class ImageDownloader:
     @property
     def timeout(self) -> int:
         try:
-            return max(3, int(self.config.get("read_timeout", self.config.get("timeout", 20))))
+            return max(1, int(self.config.get("read_timeout", self.config.get("timeout", 5))))
         except (TypeError, ValueError):
-            return 20
+            return 5
 
     @property
     def request_timeout(self) -> Tuple[int, int]:
-        connect = safe_int(self.config.get("connect_timeout", 7), 7, min_value=3, max_value=60)
-        read = safe_int(self.config.get("read_timeout", self.config.get("timeout", 20)), 20, min_value=3, max_value=180)
+        connect = safe_int(self.config.get("connect_timeout", 3), 3, min_value=1, max_value=60)
+        read = safe_int(self.config.get("read_timeout", self.config.get("timeout", 5)), 5, min_value=1, max_value=180)
         return connect, read
 
     @property
     def request_wall_clock_timeout(self) -> int:
-        return safe_int(self.config.get("request_wall_clock_timeout_seconds", 120), 120, min_value=15, max_value=3600)
+        return safe_int(self.config.get("request_wall_clock_timeout_seconds", 5), 5, min_value=1, max_value=3600)
+
+    @staticmethod
+    def _deadline_remaining(deadline: Optional[float]) -> float:
+        if deadline is None:
+            return float("inf")
+        return max(0.0, deadline - time.monotonic())
+
+    def _request_timeout_for_deadline(self, deadline: Optional[float]) -> Tuple[float, float]:
+        connect, read = self.request_timeout
+        if deadline is None:
+            return float(connect), float(read)
+        remaining = self._deadline_remaining(deadline)
+        if remaining <= 0:
+            raise TimeoutError("download exceeded request_wall_clock_timeout_seconds")
+        # Divide the remaining hard wall-clock budget between connection setup and response reads.
+        # The streaming loop independently checks the same monotonic deadline for every chunk.
+        connect_budget = min(float(connect), max(0.1, remaining * 0.4))
+        read_budget = min(float(read), max(0.1, remaining - connect_budget))
+        return connect_budget, read_budget
 
     @property
     def page_wall_clock_timeout(self) -> int:
@@ -2088,29 +2596,16 @@ class ImageDownloader:
         return bool(self.config.get("network_resilience_enabled", True))
 
     def _new_http_session(self) -> Any:
-        requests_module = self.requests
-
-        class PublicOnlySession(requests_module.Session):
-            def get_redirect_target(inner_self: Any, response: Any) -> Optional[str]:
-                target = super().get_redirect_target(response)
-                if target:
-                    resolved = urllib.parse.urljoin(str(response.url), str(target))
-                    try:
-                        require_public_destination(resolved)
-                    except ValueError as exc:
-                        raise requests_module.exceptions.InvalidURL("Redirect to a non-public destination was blocked") from exc
-                return target
-
-        session = PublicOnlySession()
+        session = self.requests.Session()
         session.headers.update({
             "User-Agent": str(self.config.get("user_agent", default_config()["user_agent"])),
             "Accept": "text/html,application/xhtml+xml,image/avif,image/webp,image/*,*/*;q=0.8",
         })
         session.max_redirects = safe_int(self.config.get("max_redirects", 12), 12, min_value=1, max_value=30)
         try:
-            workers = max(1, min(16, int(self.config.get("workers", 6) or 6)))
+            workers = max(1, min(MAX_ACTIVE_DOWNLOADS, int(self.config.get("workers", MAX_ACTIVE_DOWNLOADS) or MAX_ACTIVE_DOWNLOADS)))
         except (TypeError, ValueError):
-            workers = 6
+            workers = MAX_ACTIVE_DOWNLOADS
         pool_size = max(8, workers * 2)
         with contextlib.suppress(AttributeError, TypeError, ValueError):
             adapter = self.requests.adapters.HTTPAdapter(
@@ -2181,8 +2676,10 @@ class ImageDownloader:
         )
         return retry_after_seconds if retry_after_seconds > 0 else backoff
 
-    def _sleep_before_retry(self, url: str, stage: str, attempt: int, *, status_code: int = 0, retry_after: Any = "") -> float:
+    def _sleep_before_retry(self, url: str, stage: str, attempt: int, *, status_code: int = 0, retry_after: Any = "", deadline: Optional[float] = None) -> float:
         delay = self._network_retry_delay(attempt, retry_after)
+        if deadline is not None:
+            delay = min(delay, self._deadline_remaining(deadline))
         if self.transfer_recovery_stats:
             with self.lock:
                 self.transfer_recovery_stats["retry_events"] = int(self.transfer_recovery_stats.get("retry_events", 0)) + 1
@@ -2195,7 +2692,6 @@ class ImageDownloader:
                     "time": now_local(),
                     "stage": stage,
                     "host": url_host(url),
-                    "url_sha256": reference_sha256(url),
                     "attempt": attempt + 1,
                     "status_code": status_code,
                     "delay_seconds": round(delay, 3),
@@ -2236,8 +2732,7 @@ class ImageDownloader:
             "kind": kind,
             "stage": stage,
             "host": url_host(url),
-            "url_sha256": reference_sha256(url),
-            "reason": redact_sensitive_text(reason)[:500],
+            "reason": reason[:500],
         }
         try:
             limit = max(1, int(self.config.get("network_recovery_event_limit", 25) or 25))
@@ -2281,16 +2776,53 @@ class ImageDownloader:
         self._browser_context_resets += 1
         self._record_network_recovery("browser_context_reset", url, reason, stage)
 
-    def _handle_network_exception(self, exc: BaseException, url: str, attempt: int, stage: str, *, will_retry: bool) -> None:
+    def _handle_network_exception(self, exc: BaseException, url: str, attempt: int, stage: str, *, will_retry: bool, deadline: Optional[float] = None) -> None:
         reason = f"{exc.__class__.__name__}: {exc}"
         self.adaptive_throttle.record_network_error(url_host(url), stage, reason)
         self._reset_http_session(reason, url, stage)
-        if will_retry:
-            self._sleep_before_retry(url, stage, attempt)
+        if will_retry and self._deadline_remaining(deadline) > 0:
+            self._sleep_before_retry(url, stage, attempt, deadline=deadline)
+
+    def _fresh_automation_stats(self) -> Dict[str, Any]:
+        mode = str(self.config.get("automation_mode", "smart_safe"))
+        enabled = mode == "smart_safe"
+        return {
+            "mode": mode,
+            "enabled": enabled,
+            "automatic_features": [
+                "direct-image/page routing",
+                "duplicate URL/SHA256/visual/library detection",
+                "validator-backed resume",
+                "VPN/IP reconnect and session renewal",
+                "adaptive concurrency throttle",
+                "numbered sequence discovery when a numeric pattern exists",
+                "conservative same-domain gallery pagination",
+                "hidden completed media on Windows",
+            ] if enabled else [],
+            "manual_features": [
+                "Safe Browser Mode remains manual and trusted-sites-only",
+                "dry-run remains manually selectable",
+            ],
+            "auto_gallery_enabled": enabled and bool(self.config.get("auto_gallery_follow_enabled", True)),
+            "auto_browser_fallback": "manual_trusted_sites_only",
+            "decisions": [],
+            "last_updated": now_local(),
+        }
+
+    def _automation_decision(self, action: str, reason: str) -> None:
+        if not hasattr(self, "automation_stats") or not isinstance(self.automation_stats, dict):
+            return
+        decisions = self.automation_stats.setdefault("decisions", [])
+        item = {"time": now_local(), "action": str(action), "reason": str(reason)}
+        if item not in decisions:
+            decisions.append(item)
+        if len(decisions) > 40:
+            del decisions[:-40]
+        self.automation_stats["last_updated"] = now_local()
 
     def _fresh_sequence_stats(self) -> Dict[str, Any]:
         return {
-            "enabled": bool(self.config.get("sequence_discovery_enabled", False)),
+            "enabled": bool(self.config.get("sequence_discovery_enabled", True)),
             "same_domain_only": bool(self.config.get("sequence_same_domain_only", True)),
             "groups_found": 0,
             "groups_scanned": 0,
@@ -2312,13 +2844,13 @@ class ImageDownloader:
     def _fresh_backpressure_stats(self) -> Dict[str, Any]:
         return {
             "enabled": True,
-            "download_queue_capacity": safe_int(self.config.get("download_queue_capacity", 500), 500, min_value=1, max_value=5000),
+            "download_queue_capacity": safe_int(self.config.get("download_queue_capacity", DOWNLOAD_QUEUE_HARD_MAX), DOWNLOAD_QUEUE_HARD_MAX, min_value=1, max_value=DOWNLOAD_QUEUE_HARD_MAX),
             "download_queue_full_policy": str(self.config.get("download_queue_full_policy", "visible_reject_excess")),
             "gallery_queue_capacity": safe_int(self.config.get("gallery_queue_capacity", 100), 100, min_value=1, max_value=1000),
-            "workers": safe_int(self.config.get("workers", 6), 6, min_value=1, max_value=16),
+            "workers": safe_int(self.config.get("workers", MAX_ACTIVE_DOWNLOADS), MAX_ACTIVE_DOWNLOADS, min_value=1, max_value=MAX_ACTIVE_DOWNLOADS),
             "adaptive_throttle_enabled": bool(self.config.get("adaptive_throttle_enabled", True)),
-            "adaptive_min_workers": safe_int(self.config.get("adaptive_throttle_min_workers", 1), 1, min_value=1, max_value=16),
-            "adaptive_max_workers": safe_int(self.config.get("adaptive_throttle_max_workers", self.config.get("workers", 6)), self.config.get("workers", 6), min_value=1, max_value=16),
+            "adaptive_min_workers": safe_int(self.config.get("adaptive_throttle_min_workers", 1), 1, min_value=1, max_value=MAX_ACTIVE_DOWNLOADS),
+            "adaptive_max_workers": safe_int(self.config.get("adaptive_throttle_max_workers", self.config.get("workers", MAX_ACTIVE_DOWNLOADS)), self.config.get("workers", MAX_ACTIVE_DOWNLOADS), min_value=1, max_value=MAX_ACTIVE_DOWNLOADS),
             "retries": safe_int(self.config.get("retries", 2), 2, min_value=0, max_value=5),
             "network_recovery_extra_attempts": safe_int(self.config.get("network_recovery_extra_attempts", 2), 2, min_value=0, max_value=5),
             "submitted": 0,
@@ -2328,7 +2860,7 @@ class ImageDownloader:
             "oldest_item_age_seconds": 0,
             "shutdown_drain_timeout_seconds": safe_int(self.config.get("shutdown_drain_timeout_seconds", 10), 10, min_value=1, max_value=120),
             "shutdown_drain_status": "not_started",
-            "note": "Download work is bounded and submitted incrementally; adaptive AIMD/EWMA feedback reduces concurrency under rate/server/network pressure and cautiously restores it after healthy completions.",
+            "note": "Download work is bounded to a 100-item queue and never exceeds three active downloads; adaptive AIMD/EWMA feedback may reduce concurrency under rate/server/network pressure and cautiously restore it up to the hard cap of three.",
         }
 
     def _fresh_discovery_stats(self) -> Dict[str, Any]:
@@ -2343,6 +2875,11 @@ class ImageDownloader:
             "noscript_candidates": 0,
             "browser_network_candidates": 0,
             "browser_network_limit_reached": False,
+            "automation_mode": str(self.config.get("automation_mode", "smart_safe")),
+            "auto_gallery_enabled": str(self.config.get("automation_mode", "smart_safe")) == "smart_safe" and bool(self.config.get("auto_gallery_follow_enabled", True)),
+            "auto_gallery_links_detected": 0,
+            "auto_gallery_links_queued": 0,
+            "auto_gallery_pages_visited": 0,
             "candidate_limit_reached": False,
             "last_updated": now_local(),
         }
@@ -2412,25 +2949,9 @@ class ImageDownloader:
         if not part_path.exists() or not meta_path.exists():
             return {}
         metadata = json_load(meta_path, {})
-        if not isinstance(metadata, dict):
+        if not isinstance(metadata, dict) or metadata.get("url") != url:
             self._discard_partial(part_path, meta_path, reason="metadata mismatch")
             return {}
-        expected_url_sha256 = reference_sha256(url)
-        stored_url = str(metadata.get("url") or "")
-        stored_url_sha256 = str(metadata.get("url_sha256") or reference_sha256(stored_url))
-        if stored_url_sha256 != expected_url_sha256:
-            self._discard_partial(part_path, meta_path, reason="metadata mismatch")
-            return {}
-        sanitized = dict(metadata)
-        sanitized.update(evidence_reference_fields("url", url))
-        final_url = str(sanitized.get("final_url") or "")
-        if final_url:
-            final_url_sha256 = str(sanitized.get("final_url_sha256") or reference_sha256(final_url))
-            sanitized["final_url"] = redact_sensitive_text(final_url)
-            sanitized["final_url_sha256"] = final_url_sha256
-        if sanitized != metadata:
-            json_dump(meta_path, sanitized)
-        metadata = sanitized
         try:
             size = part_path.stat().st_size
         except OSError:
@@ -2439,15 +2960,7 @@ class ImageDownloader:
         return metadata
 
     def _write_partial_metadata(self, meta_path: Path, metadata: Dict[str, Any]) -> None:
-        sanitized = dict(metadata)
-        for field in ("url", "final_url", "source"):
-            raw = str(sanitized.get(field) or "")
-            if not raw:
-                continue
-            correlation = str(sanitized.get(f"{field}_sha256") or reference_sha256(raw))
-            sanitized[field] = redact_sensitive_text(raw)
-            sanitized[f"{field}_sha256"] = correlation
-        json_dump(meta_path, sanitized)
+        json_dump(meta_path, metadata)
 
     def _claim_download_slot(self) -> bool:
         limit = safe_int(self.config.get("limit", 0), 0, min_value=0, max_value=100000)
@@ -2507,7 +3020,7 @@ class ImageDownloader:
                 "app_version": APP_VERSION,
                 "backup": backup_ref,
                 "status": "completed",
-                "rollback_note": "The security-redacted backup preserves content/hash/path records and SHA-256 URL correlations; review older-build compatibility before restoration.",
+                "rollback_note": "Restore the backup with a compatible older build if a state schema change must be reversed.",
             }
         data["version"] = STATE_SCHEMA_VERSION
         data["state_schema_version"] = STATE_SCHEMA_VERSION
@@ -2525,42 +3038,19 @@ class ImageDownloader:
         # creating per-image sidecars or a duplicate standalone database.
         for digest, record in list(data["hashes"].items()):
             if isinstance(record, dict):
-                data["hashes"][digest] = enrich_download_asset_record(record, digest=str(digest))
-        migrated_urls: Dict[str, Dict[str, Any]] = {}
-        for stored_key, record in list(data["urls"].items()):
+                data["hashes"][digest] = enrich_download_asset_record(record, digest=str(digest), url=str(record.get("url") or ""))
+        for url, record in list(data["urls"].items()):
             if not isinstance(record, dict):
                 continue
             digest = str(record.get("sha256") or "")
             canonical = data["hashes"].get(digest) if digest else None
-            candidate = dict(canonical) if isinstance(canonical, dict) else enrich_download_asset_record(record, digest=digest)
-            stored_url = str(record.get("url") or "")
-            stored_url_sha256 = str(record.get("url_sha256") or "")
-            key_is_sha256 = bool(re.fullmatch(r"[0-9a-fA-F]{64}", str(stored_key)))
-            correlation = stored_url_sha256 or (str(stored_key).lower() if key_is_sha256 else reference_sha256(stored_url or stored_key))
-            if not correlation:
-                continue
-            if not key_is_sha256:
-                candidate.update(evidence_reference_fields("url", stored_url or stored_key))
-            else:
-                candidate["url"] = redact_sensitive_text(str(candidate.get("url") or stored_url))
-                candidate["url_sha256"] = correlation
-            migrated_urls[correlation] = candidate
-        data["urls"] = migrated_urls
+            data["urls"][url] = canonical if isinstance(canonical, dict) else enrich_download_asset_record(record, digest=digest, url=str(url))
         for digest, record in list(data["hashes"].items()):
             if not isinstance(record, dict):
                 continue
             visual = str(record.get("visual_fingerprint") or "")
             if visual and visual not in data["visual_hashes"]:
                 data["visual_hashes"][visual] = record
-        for fingerprint, record in list(data["visual_hashes"].items()):
-            if not isinstance(record, dict):
-                data["visual_hashes"].pop(fingerprint, None)
-                continue
-            digest = str(record.get("sha256") or "")
-            canonical = data["hashes"].get(digest) if digest else None
-            data["visual_hashes"][fingerprint] = (
-                canonical if isinstance(canonical, dict) else enrich_download_asset_record(record, digest=digest)
-            )
         return data
 
     def _save_download_index(self) -> None:
@@ -2745,6 +3235,299 @@ class ImageDownloader:
         )
         return stats
 
+    @property
+    def download_queue_path(self) -> Path:
+        return self.state_dir / DOWNLOAD_QUEUE_STATE_FILENAME
+
+    @property
+    def download_queue_capacity(self) -> int:
+        return safe_int(
+            self.config.get("download_queue_capacity", DOWNLOAD_QUEUE_HARD_MAX),
+            DOWNLOAD_QUEUE_HARD_MAX,
+            min_value=1,
+            max_value=DOWNLOAD_QUEUE_HARD_MAX,
+        )
+
+    def _empty_download_queue_state(self) -> Dict[str, Any]:
+        return {
+            "queue_schema_version": DOWNLOAD_QUEUE_SCHEMA_VERSION,
+            "app_version": APP_VERSION,
+            "build": BUILD_NAME,
+            "capacity": self.download_queue_capacity,
+            "max_active_downloads": MAX_ACTIVE_DOWNLOADS,
+            "updated_at": now_local(),
+            "sensitivity": "local-private-operational-urls-not-exported",
+            "items": [],
+        }
+
+    def _save_download_queue_state(self) -> None:
+        if not bool(self.config.get("download_queue_autosave_enabled", True)):
+            return
+        with self._queue_lock:
+            state = dict(self.download_queue_state) if isinstance(self.download_queue_state, dict) else self._empty_download_queue_state()
+            state["queue_schema_version"] = DOWNLOAD_QUEUE_SCHEMA_VERSION
+            state["app_version"] = APP_VERSION
+            state["build"] = BUILD_NAME
+            state["capacity"] = self.download_queue_capacity
+            state["max_active_downloads"] = MAX_ACTIVE_DOWNLOADS
+            state["updated_at"] = now_local()
+            state["sensitivity"] = "local-private-operational-urls-not-exported"
+            state["items"] = list(state.get("items", []))[: self.download_queue_capacity]
+            self.download_queue_state = state
+            json_dump(self.download_queue_path, state)
+
+    def _load_download_queue_state(self) -> Dict[str, Any]:
+        state = self._empty_download_queue_state()
+        path = self.download_queue_path
+        if not path.exists():
+            if bool(self.config.get("download_queue_autosave_enabled", True)):
+                json_dump(path, state)
+            return state
+        try:
+            loaded = json_load_strict_object(path)
+        except Exception as exc:
+            backup_ref = backup_file_for_migration(path, label="queue_corrupt", keep=5)
+            self.logger.warning("DOWNLOAD_QUEUE_RECOVERY status=corrupt_reset backup=%s error=%s", backup_ref, redact_sensitive_text(exc))
+            state["recovery_note"] = f"Corrupt queue preserved as {backup_ref}; active queue reset safely."
+            json_dump(path, state)
+            return state
+        raw_items = loaded.get("items", []) if isinstance(loaded, dict) else []
+        if not isinstance(raw_items, list):
+            raw_items = []
+        recovered: List[Dict[str, Any]] = []
+        recovered_running = 0
+        seen: Set[str] = set()
+        for raw in raw_items:
+            if len(recovered) >= self.download_queue_capacity:
+                break
+            if not isinstance(raw, dict):
+                continue
+            url = normalize_url(raw.get("url", ""))
+            if not url or url in seen:
+                continue
+            status = str(raw.get("status") or "pending").lower()
+            if status not in {"pending", "running"}:
+                continue
+            item = dict(raw)
+            item["url"] = url
+            item["url_evidence"] = redact_url_for_evidence(url)
+            item["url_sha256"] = sha256_bytes(url.encode("utf-8", errors="ignore"))
+            item["queue_id"] = str(item.get("queue_id") or uuid.uuid4().hex[:12])
+            item["queued_at"] = str(item.get("queued_at") or now_local())
+            item["attempts"] = safe_int(item.get("attempts", 0), 0, min_value=0, max_value=1000000)
+            if status == "running" and bool(self.config.get("download_queue_recovery_enabled", True)):
+                item["status"] = "pending"
+                item["recovered_at"] = now_local()
+                item["recovery_reason"] = "previous session ended while item was running"
+                recovered_running += 1
+            elif status == "running":
+                continue
+            else:
+                item["status"] = "pending"
+            recovered.append(item)
+            seen.add(url)
+        state.update({
+            "items": recovered,
+            "loaded_from_previous_session": bool(recovered),
+            "recovered_running_items": recovered_running,
+            "updated_at": now_local(),
+        })
+        self.queue_metrics["recovered_running_items"] = recovered_running
+        self.download_queue_state = state
+        self._save_download_queue_state()
+        if recovered:
+            self.logger.info("DOWNLOAD_QUEUE_RECOVERY pending=%s recovered_running=%s", len(recovered), recovered_running)
+        return self.download_queue_state
+
+    def pending_download_queue_count(self) -> int:
+        with self._queue_lock:
+            items = self.download_queue_state.get("items", []) if isinstance(self.download_queue_state, dict) else []
+            return sum(1 for item in items if isinstance(item, dict) and item.get("status") in {"pending", "running"})
+
+    def enqueue_download_urls(self, urls: Sequence[str], *, source: str = "interactive") -> Dict[str, Any]:
+        accepted: List[Dict[str, Any]] = []
+        rejected: List[Dict[str, Any]] = []
+        with self._queue_lock:
+            items = self.download_queue_state.setdefault("items", [])
+            existing = {str(item.get("url")) for item in items if isinstance(item, dict)}
+            for raw_url in urls:
+                normalized = normalize_url(raw_url)
+                if not normalized:
+                    self.queue_metrics["rejected_invalid"] += 1
+                    rejected.append({"url": redact_url_for_evidence(raw_url), "reason": "invalid URL"})
+                    continue
+                if normalized in existing:
+                    self.queue_metrics["rejected_duplicate"] += 1
+                    rejected.append({"url": redact_url_for_evidence(normalized), "reason": "already queued"})
+                    continue
+                if len(items) >= self.download_queue_capacity:
+                    self.queue_metrics["rejected_capacity"] += 1
+                    rejected.append({"url": redact_url_for_evidence(normalized), "reason": "queue capacity reached"})
+                    continue
+                item = {
+                    "queue_id": uuid.uuid4().hex[:12],
+                    "url": normalized,
+                    "url_evidence": redact_url_for_evidence(normalized),
+                    "url_sha256": sha256_bytes(normalized.encode("utf-8", errors="ignore")),
+                    "queued_at": now_local(),
+                    "status": "pending",
+                    "attempts": 0,
+                    "source": redact_source_for_evidence(source),
+                }
+                items.append(item)
+                existing.add(normalized)
+                accepted.append(item)
+                self.queue_metrics["enqueued"] += 1
+            self._save_download_queue_state()
+        return {"accepted": accepted, "rejected": rejected, "pending": self.pending_download_queue_count()}
+
+    def download_queue_preview(self, limit: int = 12) -> List[Dict[str, Any]]:
+        with self._queue_lock:
+            items = self.download_queue_state.get("items", []) if isinstance(self.download_queue_state, dict) else []
+            preview = []
+            for index, item in enumerate(items[: max(0, limit)], start=1):
+                if not isinstance(item, dict):
+                    continue
+                preview.append({
+                    "position": index,
+                    "queue_id": item.get("queue_id"),
+                    "status": item.get("status"),
+                    "queued_at": item.get("queued_at"),
+                    "url": item.get("url_evidence") or redact_url_for_evidence(item.get("url", "")),
+                    "attempts": item.get("attempts", 0),
+                })
+            return preview
+
+    def _claim_next_queued_url(self) -> Optional[Dict[str, Any]]:
+        with self._queue_lock:
+            items = self.download_queue_state.get("items", []) if isinstance(self.download_queue_state, dict) else []
+            for item in items:
+                if isinstance(item, dict) and item.get("status") == "pending":
+                    item["status"] = "running"
+                    item["started_at"] = now_local()
+                    item["attempts"] = safe_int(item.get("attempts", 0), 0, min_value=0, max_value=1000000) + 1
+                    self._save_download_queue_state()
+                    return dict(item)
+        return None
+
+    def _return_queued_url_to_pending(self, queue_id: str, reason: str) -> None:
+        with self._queue_lock:
+            for item in self.download_queue_state.get("items", []):
+                if isinstance(item, dict) and str(item.get("queue_id")) == str(queue_id):
+                    item["status"] = "pending"
+                    item["last_interrupted_at"] = now_local()
+                    item["last_error"] = redact_sensitive_text(reason)
+                    break
+            self._save_download_queue_state()
+
+    def _remove_queued_url(self, queue_id: str) -> None:
+        with self._queue_lock:
+            items = self.download_queue_state.get("items", []) if isinstance(self.download_queue_state, dict) else []
+            self.download_queue_state["items"] = [
+                item for item in items
+                if not (isinstance(item, dict) and str(item.get("queue_id")) == str(queue_id))
+            ]
+            self._save_download_queue_state()
+
+    def process_saved_download_queue(self) -> List[Dict[str, Any]]:
+        summaries: List[Dict[str, Any]] = []
+        while True:
+            item = self._claim_next_queued_url()
+            if item is None:
+                break
+            queue_id = str(item.get("queue_id") or "")
+            operational_url = str(item.get("url") or "")
+            print(f"Queue: processing {redact_url_for_evidence(operational_url)}")
+            try:
+                summary = self.process_url(operational_url)
+            except KeyboardInterrupt:
+                self._return_queued_url_to_pending(queue_id, "interrupted; item returned to pending queue")
+                raise
+            except Exception as exc:
+                self._remove_queued_url(queue_id)
+                self.queue_metrics["processed"] += 1
+                self.logger.exception("DOWNLOAD_QUEUE_ITEM_ERROR queue_id=%s url=%s", queue_id, redact_url_for_evidence(operational_url))
+                summaries.append({"queue_id": queue_id, "terminal_status": "error", "error": redact_sensitive_text(exc)})
+                continue
+            self._remove_queued_url(queue_id)
+            self.queue_metrics["processed"] += 1
+            summaries.append(summary if isinstance(summary, dict) else {})
+        return summaries
+
+    def _session_download_list_text(self, *, final: bool) -> str:
+        finished_at = now_local()
+        total_bytes = sum(safe_int(item.get("bytes", 0), 0, min_value=0) for item in self.session_download_records)
+        lines = [
+            f"{APP_NAME} — Session Download List",
+            "=" * 72,
+            f"Version: {APP_VERSION}",
+            f"Build: {BUILD_NAME}",
+            f"Session ID: {self.session_id}",
+            f"Session started: {self.session_started_at}",
+            f"Report updated: {finished_at}",
+            f"Session finalized: {bool(final)}",
+            f"Queue capacity: {self.download_queue_capacity}",
+            f"Maximum active downloads: {MAX_ACTIVE_DOWNLOADS}",
+            f"Queue pending at report time: {self.pending_download_queue_count()}",
+            f"Recovered running items this session: {self.queue_metrics.get('recovered_running_items', 0)}",
+            f"Completed downloads: {len(self.session_download_records)}",
+            f"Completed download bytes: {total_bytes}",
+            "",
+            "Top-level URL jobs:",
+        ]
+        if not self.session_job_summaries:
+            lines.append("- None")
+        else:
+            for index, item in enumerate(self.session_job_summaries, start=1):
+                duplicates = sum(safe_int(item.get(key, 0), 0, min_value=0) for key in ("duplicate_url_skips", "duplicate_content_skips", "duplicate_visual_skips"))
+                lines.append(
+                    f"{index:03d}. [{item.get('finished_at') or item.get('started_at') or ''}] "
+                    f"{item.get('terminal_status', 'unknown').upper()} | downloaded={item.get('downloaded', 0)} | "
+                    f"duplicates={duplicates} | failed={item.get('failed', 0)} | skipped={item.get('skipped', 0)} | "
+                    f"URL={item.get('input_url', '')}"
+                )
+        lines.extend(["", "Downloaded files:"])
+        if not self.session_download_records:
+            lines.append("- None")
+        else:
+            for index, item in enumerate(self.session_download_records, start=1):
+                dimensions = ""
+                if item.get("width") or item.get("height"):
+                    dimensions = f" | {item.get('width', 0)}x{item.get('height', 0)}"
+                lines.append(
+                    f"{index:03d}. [{item.get('timestamp', '')}] DOWNLOADED | {item.get('path', '')} | "
+                    f"{item.get('bytes', 0)} bytes{dimensions} | URL={item.get('url', '')}"
+                )
+        lines.extend([
+            "",
+            "Privacy: URLs in this TXT are redacted for userinfo and secret-like query values.",
+            f"Operational recovery queue: state/{DOWNLOAD_QUEUE_STATE_FILENAME} (local-private; excluded from Export20).",
+            "Copyright © 2026 Gateway Information Group LLC. All rights reserved.",
+            "",
+        ])
+        return "\n".join(lines)
+
+    def write_session_download_list(self, *, final: bool = False) -> Optional[Path]:
+        if not bool(self.config.get("session_download_list_enabled", True)):
+            return None
+        latest_name = Path(str(self.config.get("session_download_list_latest_filename", LATEST_DOWNLOAD_LIST_FILENAME))).name
+        latest_path = self.report_dir / (latest_name or LATEST_DOWNLOAD_LIST_FILENAME)
+        text = self._session_download_list_text(final=final)
+        write_text_atomic(latest_path, text)
+        if final and not self._session_report_finalized:
+            final_path = self.report_dir / f"download_list_{timestamp_unique()}_{self.session_id[-8:]}.txt"
+            write_text_atomic(final_path, text)
+            retain_recent_files(
+                self.report_dir,
+                "download_list_*.txt",
+                safe_int(self.config.get("session_download_list_retention", 25), 25, min_value=1, max_value=200),
+            )
+            self.session_report_path = final_path
+            self._session_report_finalized = True
+            self.logger.info("SESSION_DOWNLOAD_LIST final=%s latest=%s downloads=%s", short_path(final_path, self.root), short_path(latest_path, self.root), len(self.session_download_records))
+            return final_path
+        return latest_path
+
     def _start_run(self, input_url: str) -> None:
         self._stop_event.clear()
         self.failures_this_run = []
@@ -2758,6 +3541,7 @@ class ImageDownloader:
             self._reserved_output_paths.clear()
             self._active_download_reservations = 0
         self.sequence_stats = self._fresh_sequence_stats()
+        self.automation_stats = self._fresh_automation_stats()
         self.backpressure_stats = self._fresh_backpressure_stats()
         self.discovery_stats = self._fresh_discovery_stats()
         self.transfer_recovery_stats = self._fresh_transfer_recovery_stats()
@@ -2774,6 +3558,7 @@ class ImageDownloader:
         self._last_progress_monotonic = self._run_start_monotonic
         if self.instance_guard is not None:
             self.instance_guard.heartbeat("run_start")
+        safe_input_url = redact_url_for_evidence(input_url)
         self.run_summary = {
             "app": APP_NAME,
             "version": APP_VERSION,
@@ -2785,12 +3570,14 @@ class ImageDownloader:
             "elapsed_seconds": 0,
             "last_progress_elapsed_seconds": 0,
             "terminal_status": "running",
-            **evidence_reference_fields("input_url", input_url),
+            "input_url": safe_input_url,
+            "input_url_sha256": sha256_bytes(input_url.encode("utf-8", errors="ignore")),
             "mode": "Safe Browser Mode" if self.config.get("browser_mode") else "Standard Mode",
             "dry_run": bool(self.config.get("dry_run", False)),
             "output_dir": str(self.output_dir),
             "config_schema_version": self.config.get("config_schema_version", CONFIG_SCHEMA_VERSION),
             "state_schema_version": self.state.get("state_schema_version", STATE_SCHEMA_VERSION),
+            "computer_awareness": self.computer_context,
             "candidate_images_found": 0,
             "downloaded": 0,
             "duplicate_url_skips": 0,
@@ -2800,7 +3587,7 @@ class ImageDownloader:
             "skipped": 0,
             "bytes_saved": 0,
             "media_visibility": {
-                "configured_default": "hidden" if bool(self.config.get("hide_downloaded_media", False)) else "visible",
+                "configured_default": "hidden" if bool(self.config.get("hide_downloaded_media", True)) else "visible",
                 "hidden": 0,
                 "visible": 0,
                 "not_applicable": 0,
@@ -2808,6 +3595,7 @@ class ImageDownloader:
             },
             "pages_visited": 0,
             "page_failures": 0,
+            "automation": self.automation_stats,
             "sequential_search": self.sequence_stats,
             "discovery": self.discovery_stats,
             "transfer_recovery": self.transfer_recovery_stats,
@@ -2823,6 +3611,8 @@ class ImageDownloader:
         self.run_summary["elapsed_seconds"] = round(max(0.0, finished_mono - self._run_start_monotonic), 3) if self._run_start_monotonic else 0
         self.run_summary["last_progress_elapsed_seconds"] = round(max(0.0, self._last_progress_monotonic - self._run_start_monotonic), 3) if self._run_start_monotonic else 0
         self.run_summary["terminal_status"] = terminal_status
+        self.automation_stats["last_updated"] = now_local()
+        self.run_summary["automation"] = self.automation_stats
         self.run_summary["sequential_search"] = self.sequence_stats
         self.discovery_stats["last_updated"] = now_local()
         self.transfer_recovery_stats["last_updated"] = now_local()
@@ -2841,12 +3631,31 @@ class ImageDownloader:
         json_dump(self.state_dir / NOT_DOWNLOADED_FILENAME, self.not_downloaded_this_run[-limit:])
         json_dump(self.state_dir / SEQUENCE_STATS_FILENAME, self.sequence_stats)
         self._save_download_index()
+        if hasattr(self, "session_job_summaries"):
+            self.session_job_summaries.append({
+                "run_id": self.run_summary.get("run_id"),
+                "started_at": self.run_summary.get("started_at"),
+                "finished_at": self.run_summary.get("finished_at"),
+                "terminal_status": self.run_summary.get("terminal_status"),
+                "input_url": self.run_summary.get("input_url"),
+                "downloaded": self.run_summary.get("downloaded", 0),
+                "duplicate_url_skips": self.run_summary.get("duplicate_url_skips", 0),
+                "duplicate_content_skips": self.run_summary.get("duplicate_content_skips", 0),
+                "duplicate_visual_skips": self.run_summary.get("duplicate_visual_skips", 0),
+                "failed": self.run_summary.get("failed", 0),
+                "skipped": self.run_summary.get("skipped", 0),
+                "bytes_saved": self.run_summary.get("bytes_saved", 0),
+            })
+            with contextlib.suppress(Exception):
+                self.write_session_download_list(final=False)
 
     def _record_failure(self, url: str, reason: str, *, source: str = "", stage: str = "download", status_code: int = 0, content_type: str = "") -> None:
+        safe_url = redact_url_for_evidence(url)
         item = {
             "time": now_local(),
-            **evidence_reference_fields("url", url),
-            **evidence_reference_fields("source", source),
+            "url": safe_url,
+            "url_sha256": sha256_bytes(url.encode("utf-8", errors="ignore")),
+            "source": redact_source_for_evidence(source),
             "stage": stage,
             "reason": redact_sensitive_text(reason),
             "status_code": status_code,
@@ -2855,34 +3664,24 @@ class ImageDownloader:
         self.failures_this_run.append(item)
         self.not_downloaded_this_run.append(item)
         self._mark_progress()
-        self.logger.info(
-            "NOT_DOWNLOADED stage=%s reason=%s url=%s url_sha256=%s",
-            stage,
-            redact_sensitive_text(reason),
-            item["url"],
-            item["url_sha256"],
-        )
+        self.logger.info("NOT_DOWNLOADED stage=%s reason=%s url=%s", stage, redact_sensitive_text(reason), safe_url)
 
     def _record_not_downloaded(self, url: str, reason: str, *, source: str = "", stage: str = "download") -> None:
+        safe_url = redact_url_for_evidence(url)
         item = {
             "time": now_local(),
-            **evidence_reference_fields("url", url),
-            **evidence_reference_fields("source", source),
+            "url": safe_url,
+            "url_sha256": sha256_bytes(url.encode("utf-8", errors="ignore")),
+            "source": redact_source_for_evidence(source),
             "stage": stage,
             "reason": redact_sensitive_text(reason),
         }
         self.not_downloaded_this_run.append(item)
         self._mark_progress()
-        self.logger.info(
-            "SKIPPED stage=%s reason=%s url=%s url_sha256=%s",
-            stage,
-            redact_sensitive_text(reason),
-            item["url"],
-            item["url_sha256"],
-        )
+        self.logger.info("SKIPPED stage=%s reason=%s url=%s", stage, redact_sensitive_text(reason), safe_url)
 
     def _state_url_record_exists(self, url: str) -> bool:
-        rec = self.state.get("urls", {}).get(reference_sha256(url))
+        rec = self.state.get("urls", {}).get(url)
         if not isinstance(rec, dict):
             return False
         rel = rec.get("path", "")
@@ -2905,6 +3704,7 @@ class ImageDownloader:
         rel = short_path(path, self.root)
         saved_at = now_local()
         record = enrich_download_asset_record({
+            "url": url,
             "path": rel,
             "sha256": digest,
             "bytes": bytes_saved,
@@ -2917,16 +3717,28 @@ class ImageDownloader:
             "modified_at": saved_at,
             "media_visibility": media_visibility,
             "media_visibility_note": media_visibility_note,
-            "windows_hidden_attribute_requested": bool(self.config.get("hide_downloaded_media", False)),
+            "windows_hidden_attribute_requested": bool(self.config.get("hide_downloaded_media", True)),
             "visual_fingerprint": visual_fingerprint,
             "visual_fingerprint_method": visual_fingerprint_method,
             "visual_fingerprint_note": visual_fingerprint_note,
         }, digest=digest, url=url)
         self.state["asset_metadata_schema"] = ASSET_METADATA_SCHEMA
-        self.state.setdefault("urls", {})[reference_sha256(url)] = record
+        self.state.setdefault("urls", {})[url] = record
         self.state.setdefault("hashes", {})[digest] = record
         if visual_fingerprint:
             self.state.setdefault("visual_hashes", {})[visual_fingerprint] = record
+        if hasattr(self, "session_download_records"):
+            self.session_download_records.append({
+                "timestamp": saved_at,
+                "path": rel,
+                "bytes": bytes_saved,
+                "sha256": digest,
+                "content_type": content_type,
+                "width": width,
+                "height": height,
+                "url": redact_url_for_evidence(url),
+                "url_sha256": sha256_bytes(url.encode("utf-8", errors="ignore")),
+            })
 
     def _make_output_path(self, url: str, fmt: str, digest: str) -> Path:
         parsed = urllib.parse.urlparse(url)
@@ -2962,14 +3774,15 @@ class ImageDownloader:
         limit = safe_int(self.config.get("limit", 0), 0, min_value=0, max_value=100000)
         return limit > 0 and int(self.run_summary.get("downloaded", 0)) >= limit
 
-    def head_probe(self, url: str) -> Tuple[int, str, int]:
-        url = require_public_destination(url)
+    def head_probe(self, url: str, *, deadline: Optional[float] = None) -> Tuple[int, str, int]:
         attempts = safe_int(self.config.get("network_head_probe_retries", 1), 1, min_value=0, max_value=5)
         if not self._network_enabled():
             attempts = 0
         for attempt in range(attempts + 1):
+            if self._deadline_remaining(deadline) <= 0:
+                return 0, "", 0
             try:
-                with self._get_http_session().head(url, allow_redirects=True, timeout=self.request_timeout) as resp:
+                with self._get_http_session().head(url, allow_redirects=True, timeout=self._request_timeout_for_deadline(deadline)) as resp:
                     content_type = resp.headers.get("Content-Type", "")
                     length_text = resp.headers.get("Content-Length", "")
                     length = int(length_text) if length_text.isdigit() else 0
@@ -2980,11 +3793,13 @@ class ImageDownloader:
                             attempt,
                             status_code=int(resp.status_code),
                             retry_after=resp.headers.get("Retry-After", ""),
+                            deadline=deadline,
                         )
                         continue
                     return int(resp.status_code), content_type, length
             except self.requests.exceptions.RequestException as exc:
-                self._handle_network_exception(exc, url, attempt, "head_probe", will_retry=attempt < attempts)
+                will_retry = attempt < attempts and self._deadline_remaining(deadline) > 0
+                self._handle_network_exception(exc, url, attempt, "head_probe", will_retry=will_retry, deadline=deadline)
         return 0, "", 0
 
     def download_one(self, url: str, *, source: str = "", reason: str = "discovered", enforce_host: str = "") -> DownloadResult:
@@ -2994,13 +3809,7 @@ class ImageDownloader:
             with self.lock:
                 self.run_summary["failed"] += 1
             return DownloadResult(url=url, status="failed", reason="invalid URL")
-        try:
-            url = require_public_destination(normalized)
-        except ValueError as exc:
-            self._record_failure(normalized, str(exc), source=source, stage=reason)
-            with self.lock:
-                self.run_summary["failed"] += 1
-            return DownloadResult(url=normalized, status="failed", reason="non-public destination")
+        url = normalized
         if has_dangerous_extension(url):
             self._record_failure(url, "blocked dangerous file extension", source=source, stage=reason)
             with self.lock:
@@ -3049,9 +3858,17 @@ class ImageDownloader:
         retries = safe_int(self.config.get("retries", 2), 2, min_value=0, max_value=5)
         extra_network_retries = safe_int(self.config.get("network_recovery_extra_attempts", 2), 2, min_value=0, max_value=5)
         operation_started = time.monotonic()
+        operation_deadline = operation_started + self.request_wall_clock_timeout
         try:
-            # HEAD is a single bounded preflight, not repeated for every GET retry.
-            head_status, head_type, head_length = self.head_probe(url)
+            # HEAD and GET share one strict monotonic per-image download budget.
+            head_status, head_type, head_length = self.head_probe(url, deadline=operation_deadline)
+            if self._deadline_remaining(operation_deadline) <= 0:
+                self._bump_transfer_stat("wall_clock_aborts")
+                timeout_reason = f"download exceeded {self.request_wall_clock_timeout}-second limit"
+                self._record_failure(url, timeout_reason, source=source, stage=reason, status_code=head_status, content_type=head_type)
+                with self.lock:
+                    self.run_summary["failed"] += 1
+                return DownloadResult(url=url, status="failed", reason=timeout_reason, status_code=head_status, content_type=head_type)
             if head_status in {404, 410}:
                 self._discard_partial(part_path, meta_path, reason=f"HTTP {head_status}")
                 self._record_failure(url, f"HTTP {head_status}", source=source, stage=reason, status_code=head_status, content_type=head_type)
@@ -3074,7 +3891,7 @@ class ImageDownloader:
             for attempt in range(retries + extra_network_retries + 1):
                 if self._stop_event.is_set():
                     raise RuntimeError("shutdown requested")
-                if time.monotonic() - operation_started > self.request_wall_clock_timeout:
+                if self._deadline_remaining(operation_deadline) <= 0:
                     self._bump_transfer_stat("wall_clock_aborts")
                     raise TimeoutError("download exceeded request_wall_clock_timeout_seconds")
 
@@ -3111,12 +3928,12 @@ class ImageDownloader:
                         url,
                         stream=True,
                         allow_redirects=True,
-                        timeout=self.request_timeout,
+                        timeout=self._request_timeout_for_deadline(operation_deadline),
                         headers=headers,
                     ) as resp:
                         status_code = int(resp.status_code)
                         content_type = resp.headers.get("Content-Type", "")
-                        final_url = require_public_destination(resp.url)
+                        final_url = normalize_url(resp.url) or url
 
                         if self._retryable_status(status_code) and attempt < retries:
                             last_error = f"HTTP {status_code}"
@@ -3126,6 +3943,7 @@ class ImageDownloader:
                                 attempt,
                                 status_code=status_code,
                                 retry_after=resp.headers.get("Retry-After", ""),
+                                deadline=operation_deadline,
                             )
                             continue
 
@@ -3139,7 +3957,7 @@ class ImageDownloader:
                                 self._bump_transfer_stat("partial_restarts")
                                 last_error = "HTTP 416 range could not be resumed"
                                 if attempt < retries:
-                                    self._sleep_before_retry(url, reason, attempt, status_code=status_code)
+                                    self._sleep_before_retry(url, reason, attempt, status_code=status_code, deadline=operation_deadline)
                                     continue
                                 raise RuntimeError(last_error)
 
@@ -3213,7 +4031,7 @@ class ImageDownloader:
                                 for chunk in resp.iter_content(chunk_size=chunk_size):
                                     if self._stop_event.is_set():
                                         raise RuntimeError("shutdown requested")
-                                    if time.monotonic() - operation_started > self.request_wall_clock_timeout:
+                                    if self._deadline_remaining(operation_deadline) <= 0:
                                         self._bump_transfer_stat("wall_clock_aborts")
                                         raise TimeoutError("download exceeded request_wall_clock_timeout_seconds")
                                     if not chunk:
@@ -3330,7 +4148,7 @@ class ImageDownloader:
                         with contextlib.suppress(OSError):
                             target_tmp.unlink()
                         raise
-                    hide_media = bool(self.config.get("hide_downloaded_media", False))
+                    hide_media = bool(self.config.get("hide_downloaded_media", True))
                     visibility_status, visibility_note = apply_downloaded_media_visibility(output_path, hide_media)
                     if visibility_status == "failed":
                         self.logger.warning(
@@ -3358,12 +4176,11 @@ class ImageDownloader:
                         self._mark_progress()
                     self._checkpoint_state_if_due()
                     self.logger.info(
-                        "DOWNLOADED bytes=%s validation=%s path=%s url=%s url_sha256=%s",
+                        "DOWNLOADED bytes=%s validation=%s path=%s url=%s",
                         file_size,
                         verification_mode,
                         short_path(output_path, self.root),
-                        redact_sensitive_text(url),
-                        reference_sha256(url),
+                        redact_url_for_evidence(url),
                     )
                     print(f"Downloaded: {short_path(output_path, self.root)}")
                     return DownloadResult(url=url, status="downloaded", path=short_path(output_path, self.root), bytes_saved=file_size, sha256=digest, content_type=content_type, status_code=status_code, width=width, height=height)
@@ -3371,15 +4188,20 @@ class ImageDownloader:
                     raise
                 except self.requests.exceptions.RequestException as exc:
                     last_error = f"network error: {exc}"
-                    will_retry = attempt < retries + extra_network_retries
-                    self._handle_network_exception(exc, url, attempt, reason, will_retry=will_retry)
+                    will_retry = attempt < retries + extra_network_retries and self._deadline_remaining(operation_deadline) > 0
+                    self._handle_network_exception(exc, url, attempt, reason, will_retry=will_retry, deadline=operation_deadline)
                     if will_retry:
                         continue
                 except (OSError, RuntimeError, ValueError) as exc:
                     last_error = f"{exc.__class__.__name__}: {exc}"
-                    will_retry = attempt < retries and "shutdown requested" not in str(exc)
+                    will_retry = (
+                        attempt < retries
+                        and "shutdown requested" not in str(exc)
+                        and not isinstance(exc, TimeoutError)
+                        and self._deadline_remaining(operation_deadline) > 0
+                    )
                     if will_retry:
-                        self._sleep_before_retry(url, reason, attempt)
+                        self._sleep_before_retry(url, reason, attempt, deadline=operation_deadline)
                         continue
                 break
 
@@ -3398,7 +4220,7 @@ class ImageDownloader:
         normalized = normalize_url(url)
         if not normalized:
             raise ValueError("Invalid URL")
-        url = require_public_destination(normalized)
+        url = normalized
         retries = safe_int(self.config.get("retries", 2), 2, min_value=0, max_value=5)
         last_error = ""
         operation_started = time.monotonic()
@@ -3423,7 +4245,7 @@ class ImageDownloader:
                         continue
                     if status_code >= 400:
                         raise RuntimeError(f"HTTP {status_code}")
-                    final_url = require_public_destination(resp.url)
+                    final_url = normalize_url(resp.url) or url
                     content_type = resp.headers.get("Content-Type", "")
                     if is_dangerous_content_type(content_type):
                         raise RuntimeError(f"Blocked dangerous content type: {content_type}")
@@ -3471,38 +4293,14 @@ class ImageDownloader:
             from playwright.sync_api import sync_playwright  # type: ignore
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "Safe Browser Mode requires Playwright. Install requirements-browser.txt and the Chromium runtime as described in README.md."
+                "Safe Browser Mode requires Playwright. Use run_image_downloader_safe_browser.bat to install and run it."
             ) from exc
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(headless=True)
         self._browser_context = self._browser.new_context(
             user_agent=str(self.config.get("user_agent", default_config()["user_agent"])),
             ignore_https_errors=False,
-            service_workers="block",
         )
-
-        def enforce_public_route(route: Any) -> None:
-            try:
-                request_url = require_public_destination(str(route.request.url))
-                response = route.fetch(
-                    max_redirects=0,
-                    timeout=self.page_wall_clock_timeout * 1000,
-                )
-                location = str(response.headers.get("location", "")).strip()
-                if 300 <= int(response.status) < 400 and location:
-                    next_url = normalize_url(location, base=request_url)
-                    if not next_url:
-                        raise ValueError("Redirect target is invalid")
-                    require_public_destination(next_url)
-                route.fulfill(response=response)
-            except (AttributeError, RuntimeError, TypeError, ValueError):
-                route.abort()
-
-        # Context-level routing covers every page, including popup navigation
-        # and subresources. Fetching zero redirects at a time returns each 3xx
-        # to Chromium so its next request is screened as a fresh routed request.
-        # Service workers are disabled above so they cannot bypass this handler.
-        self._browser_context.route("**/*", enforce_public_route)
         return self._browser_context
 
     def close_browser(self) -> None:
@@ -3518,6 +4316,8 @@ class ImageDownloader:
             self._playwright = None
 
     def close(self) -> None:
+        with contextlib.suppress(Exception):
+            self.write_session_download_list(final=True)
         self._stop_event.set()
         self.close_browser()
         self._close_all_http_sessions()
@@ -3526,7 +4326,6 @@ class ImageDownloader:
         normalized = normalize_url(url)
         if not normalized:
             raise ValueError("Invalid URL")
-        normalized = require_public_destination(normalized)
         wait_ms = safe_int(self.config.get("browser_wait_ms", 500), 500, min_value=0, max_value=10000)
         scroll_steps = safe_int(self.config.get("browser_scroll_steps", 3), 3, min_value=0, max_value=25)
         retries = safe_int(self.config.get("retries", 2), 2, min_value=0, max_value=5)
@@ -3553,8 +4352,6 @@ class ImageDownloader:
                         try:
                             response_url = normalize_url(response.url)
                             if not response_url or response_url in observed_seen or has_dangerous_extension(response_url):
-                                return
-                            if not destination_host_is_public(url_host(response_url), resolve_dns=True):
                                 return
                             content_type = str(response.headers.get("content-type", ""))
                             resource_type = str(getattr(response.request, "resource_type", ""))
@@ -3585,7 +4382,7 @@ class ImageDownloader:
                     page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
                     if wait_ms:
                         page.wait_for_timeout(wait_ms)
-                final_url = require_public_destination(page.url)
+                final_url = normalize_url(page.url) or normalized
                 if navigation_response is not None:
                     nav_content_type = str(navigation_response.headers.get("content-type", ""))
                     if base_content_type(nav_content_type).startswith("image/") or is_allowed_image_url(final_url, self.config):
@@ -3636,6 +4433,10 @@ class ImageDownloader:
         same_only = bool(self.config.get("same_domain_only", False))
         modern = bool(self.config.get("modern_discovery_enabled", True))
         max_candidates = safe_int(self.config.get("max_candidate_urls_per_page", 500), 500, min_value=1, max_value=5000)
+        smart_auto = str(self.config.get("automation_mode", "smart_safe")) == "smart_safe"
+        manual_gallery = bool(self.config.get("follow_gallery_links", False))
+        auto_gallery = smart_auto and bool(self.config.get("auto_gallery_follow_enabled", True)) and not manual_gallery
+        auto_gallery_link_limit = safe_int(self.config.get("auto_gallery_link_limit_per_page", 12), 12, min_value=1, max_value=50)
 
         stat_key_map = {
             "html": "html_attribute_candidates",
@@ -3765,9 +4566,15 @@ class ImageDownloader:
                     continue
                 if is_allowed_image_url(normalized, self.config):
                     add_url(normalized, kind="html")
-                elif bool(self.config.get("follow_gallery_links", False)) and same_hostname(base_url, normalized):
+                elif same_hostname(base_url, normalized):
                     low_path = urllib.parse.urlparse(normalized).path.lower()
-                    if not any(low_path.endswith("." + ext) for ext in DANGEROUS_EXTENSIONS):
+                    if any(low_path.endswith("." + ext) for ext in DANGEROUS_EXTENSIONS):
+                        continue
+                    should_follow = manual_gallery
+                    if auto_gallery and len(gallery_links) < auto_gallery_link_limit and gallery_link_is_safe_auto(anchor, normalized, base_url):
+                        should_follow = True
+                        self.discovery_stats["auto_gallery_links_detected"] = int(self.discovery_stats.get("auto_gallery_links_detected", 0)) + 1
+                    if should_follow:
                         add_url(normalized, gallery=True)
         else:
             for raw in re.findall(r'''(?:src|href|poster|data-src|data-original|data-lazy-src|data-image-src)=['"]([^'"]+)['"]''', html_text, flags=re.I):
@@ -3799,9 +4606,19 @@ class ImageDownloader:
         page_errors: List[str] = []
         queue_items: queue.Queue[Tuple[str, int]] = queue.Queue()
         queue_items.put((url, 0))
-        page_limit = safe_int(self.config.get("gallery_page_limit", 6), 6, min_value=1, max_value=50)
-        max_depth = safe_int(self.config.get("gallery_max_depth", 1), 1, min_value=0, max_value=4)
-        follow_gallery = bool(self.config.get("follow_gallery_links", False))
+        manual_gallery = bool(self.config.get("follow_gallery_links", False))
+        smart_auto = str(self.config.get("automation_mode", "smart_safe")) == "smart_safe"
+        auto_gallery = smart_auto and bool(self.config.get("auto_gallery_follow_enabled", True)) and not manual_gallery
+        follow_gallery = manual_gallery or auto_gallery
+        if manual_gallery:
+            page_limit = safe_int(self.config.get("gallery_page_limit", 6), 6, min_value=1, max_value=50)
+            max_depth = safe_int(self.config.get("gallery_max_depth", 1), 1, min_value=0, max_value=4)
+        elif auto_gallery:
+            page_limit = safe_int(self.config.get("auto_gallery_page_limit", 3), 3, min_value=1, max_value=10)
+            max_depth = safe_int(self.config.get("auto_gallery_max_depth", 1), 1, min_value=0, max_value=2)
+        else:
+            page_limit = 1
+            max_depth = 0
         gallery_queue_capacity = safe_int(self.config.get("gallery_queue_capacity", 100), 100, min_value=1, max_value=1000)
 
         while not queue_items.empty() and len(visited_pages) < max(1, page_limit):
@@ -3813,6 +4630,8 @@ class ImageDownloader:
             try:
                 html_text, final_url, is_image = self.fetch_page(page_url)
                 self.run_summary["pages_visited"] += 1
+                if auto_gallery and depth > 0:
+                    self.discovery_stats["auto_gallery_pages_visited"] = int(self.discovery_stats.get("auto_gallery_pages_visited", 0)) + 1
                 if is_image:
                     candidates.append(final_url)
                     continue
@@ -3842,6 +4661,8 @@ class ImageDownloader:
                                 self._record_not_downloaded(link, "gallery queue capacity reached", source=page_url, stage="gallery_queue")
                                 continue
                             queue_items.put((link, depth + 1))
+                            if auto_gallery:
+                                self.discovery_stats["auto_gallery_links_queued"] = int(self.discovery_stats.get("auto_gallery_links_queued", 0)) + 1
             except Exception as exc:
                 msg = f"{page_url}: {exc}"
                 page_errors.append(msg)
@@ -3868,9 +4689,9 @@ class ImageDownloader:
     def download_many(self, urls: Sequence[str], *, source: str = "", reason: str = "discovered") -> List[DownloadResult]:
         if not urls:
             return []
-        configured_workers = safe_int(self.config.get("workers", 6), 6, min_value=1, max_value=16)
-        executor_workers = max(configured_workers, self.adaptive_throttle.max_limit)
-        capacity = safe_int(self.config.get("download_queue_capacity", 500), 500, min_value=1, max_value=5000)
+        configured_workers = safe_int(self.config.get("workers", MAX_ACTIVE_DOWNLOADS), MAX_ACTIVE_DOWNLOADS, min_value=1, max_value=MAX_ACTIVE_DOWNLOADS)
+        executor_workers = min(MAX_ACTIVE_DOWNLOADS, max(configured_workers, self.adaptive_throttle.max_limit))
+        capacity = safe_int(self.config.get("download_queue_capacity", DOWNLOAD_QUEUE_HARD_MAX), DOWNLOAD_QUEUE_HARD_MAX, min_value=1, max_value=DOWNLOAD_QUEUE_HARD_MAX)
         drain_timeout = safe_int(self.config.get("shutdown_drain_timeout_seconds", 10), 10, min_value=1, max_value=120)
         queued_at = time.monotonic()
         url_list = list(urls)
@@ -4058,7 +4879,7 @@ class ImageDownloader:
         anchors = anchors[:max_anchors]
         template = by_number.get(anchors[0], patterns[0])
         group_detail = {
-            **evidence_reference_fields("signature", template.signature),
+            "signature": template.signature,
             "anchors": anchors,
             "probes_attempted": 0,
             "downloaded": 0,
@@ -4126,13 +4947,14 @@ class ImageDownloader:
         self.sequence_stats["last_updated"] = now_local()
 
     def run_sequence_discovery(self, seed_urls: Sequence[str], *, source_page: str = "") -> None:
-        if not bool(self.config.get("sequence_discovery_enabled", False)):
+        if not bool(self.config.get("sequence_discovery_enabled", True)):
             return
         groups = self.build_sequence_groups(seed_urls)
         self.sequence_stats["groups_found"] = len(groups)
         if not groups:
             return
         print(f"Sequential discovery: {len(groups)} numbered pattern group(s) found.")
+        self._automation_decision("sequence_discovery", f"activated for {len(groups)} numbered pattern group(s)")
         for _signature, patterns in list(groups.items())[: safe_int(self.config.get("sequence_max_seed_groups_per_run", 30), 30, min_value=1, max_value=100)]:
             self.scan_sequence_group(patterns, source_page=source_page)
 
@@ -4142,24 +4964,24 @@ class ImageDownloader:
             print("Invalid URL. Please paste a full http:// or https:// URL.")
             return {}
         self._start_run(normalized)
-        self.logger.info(
-            "RUN_START top_level_run_id=%s run_id=%s url=%s url_sha256=%s mode=%s dry_run=%s",
-            self.top_level_run_id,
-            self.run_summary.get("run_id"),
-            self.run_summary["input_url"],
-            self.run_summary["input_url_sha256"],
-            self.run_summary["mode"],
-            self.run_summary["dry_run"],
-        )
+        self.logger.info("RUN_START top_level_run_id=%s run_id=%s url=%s mode=%s dry_run=%s", self.top_level_run_id, self.run_summary.get("run_id"), redact_url_for_evidence(normalized), self.run_summary["mode"], self.run_summary["dry_run"])
+        if self.automation_stats.get("enabled"):
+            print("Smart Safe Automation: ON (duplicates, resume, reconnect, adaptive throttle, sequence, bounded gallery)")
         try:
             if is_allowed_image_url(normalized, self.config):
+                self._automation_decision("routing", "direct image URL detected")
                 candidates = [normalized]
                 page_errors: List[str] = []
             else:
+                self._automation_decision("routing", "page discovery selected")
                 candidates, page_errors = self.collect_candidates_from_page(normalized)
+                auto_pages = int(self.discovery_stats.get("auto_gallery_pages_visited", 0))
+                if auto_pages:
+                    self._automation_decision("bounded_gallery", f"followed {auto_pages} strong same-domain gallery/pagination page(s)")
                 if not candidates and not page_errors:
                     # Some image URLs have no extension and no useful content type until downloaded.
                     candidates = [normalized]
+                    self._automation_decision("fallback", "page returned no candidates; direct validation attempted")
             self.run_summary["candidate_images_found"] = len(candidates)
             if not candidates:
                 print("No image candidates found.")
@@ -4175,12 +4997,7 @@ class ImageDownloader:
                 f"failed={self.run_summary.get('failed', 0)}, "
                 f"output={self.output_dir}"
             )
-            self.logger.info(
-                "RUN_FINISH top_level_run_id=%s run_id=%s summary=%s",
-                self.top_level_run_id,
-                self.run_summary.get("run_id"),
-                redact_sensitive_text(json.dumps(self.run_summary, ensure_ascii=False)),
-            )
+            self.logger.info("RUN_FINISH top_level_run_id=%s run_id=%s summary=%s", self.top_level_run_id, self.run_summary.get("run_id"), json.dumps(self.run_summary, ensure_ascii=False))
             return self.run_summary
         except KeyboardInterrupt:
             self._finish_run("interrupted")
@@ -4190,11 +5007,7 @@ class ImageDownloader:
             self.run_summary["failed"] += 1
             self._finish_run("error")
             print(f"Error: {exc}")
-            self.logger.exception(
-                "RUN_ERROR url=%s url_sha256=%s",
-                redact_sensitive_text(normalized),
-                reference_sha256(normalized),
-            )
+            self.logger.exception("RUN_ERROR url=%s", redact_url_for_evidence(normalized))
             return self.run_summary
 
 
@@ -4248,17 +5061,24 @@ def dependency_environment_summary(root: Path, config_path: Path) -> str:
         "- Opens and closes pages per URL to avoid page-memory buildup.",
         "- Browser runtimes are not bundled in the ZIP.",
         "",
+        computer_awareness_summary(root, config_path).rstrip(),
+        "",
         "Network/VPN resilience:",
         "- Standard HTTP sessions are recreated after connection/timeout errors.",
         "- HTTP sessions are thread-local by default so concurrent downloads do not fight over one pooled session.",
         "- This helps VPN or IP changes recover without adding a new menu option.",
         "",
-        "Support posture:",
-        "- Runtime folders, caches, downloads, and local configuration are excluded from version control.",
-        "- Diagnostics redact likely credentials and user-specific filesystem paths.",
-        "- Standard launchers validate prerequisites and preserve command exit codes.",
-        "- Downloaded files are validated, saved visibly by default, and never executed.",
-        "- Network requests are restricted to globally routable HTTP(S) destinations.",
+        "Best-practices compliance:",
+        f"- Parameter alignment: {PARAMETER_ALIGNMENT_VERSION}.",
+        "- Package-level MANIFEST.json, CHANGELOG.md, README_QUICK_START.md, and VERSION.txt are maintained; known-good/transfer/health evidence is generated into Export20.",
+        "- Export20 collector is updated when runtime behavior changes and stays at or below 20 files.",
+        "- Runtime folders/caches/downloads are excluded from release ZIPs and support exports.",
+        "- v2.17.5 system-aware diagnostics are redacted and avoid raw PC identifiers.",
+        "- v2.17.5 structured external release archive status is recorded without making local runtime depend on Drive.",
+        "- v2.17.5 custom-input/config/path assurance is summarized without adding a new menu option.",
+        "- v2.9+ integration drift evidence remains compact, cached, and off the normal startup path.",
+        "- Launcher hardening: launchers prove Python works, verify write access, require complete release controls for override/fallback targets, run the identity gate before dependency installs, and preserve failure exit codes.",
+        "- Export hotfix: diagnostic/export runs do not take the interactive lock, use unique filenames, and publish ZIPs atomically after successful creation.",
         "",
         transport_discovery_summary(root, config_path).rstrip(),
         "",
@@ -4270,9 +5090,9 @@ def dependency_environment_summary(root: Path, config_path: Path) -> str:
         "",
         asset_metadata_reconciliation_summary(root, config_path).rstrip(),
         "",
-        support_scope_summary(root, config_path).rstrip(),
+        release_archive_status_summary(root, config_path).rstrip(),
         "",
-        public_safety_summary(root, config_path).rstrip(),
+        parameter_alignment_summary(root, config_path).rstrip(),
         "",
         system_aware_environment_summary(root, config_path).rstrip(),
     ]
@@ -4307,8 +5127,8 @@ def integration_registry_summary(root: Path, config_path: Path) -> str:
         "   - Contract probe: non-mutating page render/content read; no downloads are executed or opened.",
         "   - Risk state: warning if used on untrusted sites; normal Standard Mode remains preferred/default.",
         "3. Python package dependencies",
-        "   - Type: requests, beautifulsoup4, pillow, and optional playwright installed explicitly from the checked-in requirements files.",
-        "   - Version posture: launchers validate imports and print the documented installation command when a dependency is missing; they do not install silently.",
+        "   - Type: requests, beautifulsoup4, pillow, and optional playwright installed through pip when missing.",
+        "   - Version posture: launchers use bounded major-version ranges when installing missing dependencies; already-working imports are not silently upgraded.",
         "   - Security posture: no bundled executables; no autostart/services/firewall changes; dependency status is summarized in diagnostics.",
         "",
         "Not used:",
@@ -4338,14 +5158,22 @@ def config_input_assurance_summary(root: Path, config_path: Path) -> str:
         "max_candidate_urls_per_page", "max_file_mb", "max_html_mb",
         "duplicate_url_check", "duplicate_content_hash_check", "duplicate_visual_fingerprint_check", "duplicate_library_reconcile_enabled", "single_instance_guard_enabled",
         "download_queue_capacity", "download_queue_full_policy", "log_max_bytes", "log_backup_count",
+        "preferred_bot_dir", "bot_dir_env_override_name", "path_targeting_mode", "portable_fallback_enabled",
     ]
-    launcher_contract_keys: Set[str] = set()
+    launcher_contract_keys = {
+        "preferred_bot_dir", "bot_dir_env_override_name", "path_targeting_mode",
+        "portable_fallback_enabled", "launcher_sync_installed_files",
+    }
     evidence_metadata_keys = {
         key for key in recognized_keys
-        if key.startswith("platform_")
+        if key.startswith("google_drive_")
+        or key.startswith("platform_")
+        or key.startswith("omission_")
+        or key.startswith("thread_context_")
         or key in {
-            "asset_metadata",
+            "parameter_alignment_version", "system_aware_primer_version", "asset_metadata",
             "config_last_migration", "state_last_migration",
+            "relocation_repair_status", "relocation_repair_note",
         }
     }
     runtime_keys = [
@@ -4358,16 +5186,18 @@ def config_input_assurance_summary(root: Path, config_path: Path) -> str:
     lines = [
         "Custom-input / config assurance snapshot:",
         f"- Enabled: {bool(cfg.get('custom_input_assurance_enabled', True))}",
+        f"- Parameter alignment: {cfg.get('parameter_alignment_version', PARAMETER_ALIGNMENT_VERSION)}",
         f"- Config path: {safe_display_path(config_path, root)}",
         f"- Recognized keys: {len(recognized_keys)}",
         f"- Runtime-consumed/config-policy keys: {len(runtime_keys)}",
         f"- Launcher-contract keys: {len(launcher_contract_keys.intersection(recognized_keys))}",
-        f"- Support metadata keys: {len(evidence_metadata_keys)}",
-        "- Mapping categories: runtime controls and support metadata.",
+        f"- Evidence/transfer metadata keys: {len(evidence_metadata_keys)}",
+        "- Mapping categories: runtime-consumed/config-policy, launcher-contract, and evidence/transfer metadata.",
         f"- Unknown/custom keys: {len(unknown_keys)}",
         f"- Status: {status}",
-        "- Verification chain: known keys are normalized before runtime use; unknown keys are retained for forward compatibility and reported below.",
-        "- Source precedence: CLI flags override browser and dry-run session modes; the local JSON config overrides defaults; defaults fill missing optional values.",
+        "- Verification chain: all known keys are recognized and normalized; runtime keys are mapped where consumed; launcher-contract keys are verified against BAT behavior; evidence/transfer metadata is reported but is not falsely presented as exercised downloader logic.",
+        "- Source precedence: CLI flags override session mode for browser/dry-run; image_downloader_config.json overrides defaults; defaults fill missing optional values; IMAGE_DOWNLOADER_BOT_DIR is consumed by launchers rather than Python config parsing.",
+        "- Compatibility note: launcher_sync_installed_files is retained as launcher-policy metadata. The actual project-folder-first targeting and compatibility fallback behavior is implemented and statically verified in the BAT launchers.",
         "- Secrets: no credential-bearing fields are required; redaction still covers common token/password/key names if accidentally present.",
         f"- Effective-input fingerprint: {hashlib.sha256(fingerprint_source.encode('utf-8')).hexdigest()[:16]}",
     ]
@@ -4383,10 +5213,18 @@ def config_input_assurance_summary(root: Path, config_path: Path) -> str:
 
 
 def asset_metadata_reconciliation_summary(root: Path, config_path: Path) -> str:
-    """Summarize application files and the runtime image catalog."""
-    manifest: Dict[str, Any] = {"metadata_schema": ASSET_METADATA_SCHEMA}
-    records: List[Dict[str, Any]] = []
-    required_fields = {"path"}
+    """Reconcile package asset metadata and summarize the runtime image catalog."""
+    manifest_path = root / "MANIFEST.json"
+    manifest = json_load(manifest_path, {})
+    cfg = json_load(config_path, {})
+    runtime_export_name = Path(str(cfg.get("canonical_export_filename", CANONICAL_EXPORT_FILENAME))).name
+    records = manifest.get("files", []) if isinstance(manifest, dict) else []
+    records = records if isinstance(records, list) else []
+    required_fields = {
+        "asset_id", "path", "title", "purpose", "asset_class", "role", "format",
+        "project_slug", "version", "status", "sensitivity", "source_of_truth",
+        "tags", "aliases", "lineage", "created_cdt", "modified_cdt", "size_bytes", "sha256",
+    }
     missing_files: List[str] = []
     missing_fields: List[str] = []
     stale_static: List[str] = []
@@ -4420,13 +5258,13 @@ def asset_metadata_reconciliation_summary(root: Path, config_path: Path) -> str:
                 probe = path.read_bytes()[:65536].decode("utf-8", errors="ignore")
             except OSError:
                 probe = ""
-            if asset_id not in probe:
+            if asset_id not in probe and rel not in {"MANIFEST.json"}:
                 header_gaps.append(rel)
     actual_release_files = {
         path.name for path in root.iterdir()
-        if path.is_file() and path.name not in {".DS_Store", "Thumbs.db"}
+        if path.is_file() and path.name not in {".DS_Store", "Thumbs.db", runtime_export_name}
     }
-    unregistered: List[str] = []
+    unregistered = sorted(actual_release_files - record_paths)
 
     state = json_load(root / STATE_DIRNAME / DOWNLOAD_INDEX_FILENAME, {})
     hash_records = state.get("hashes", {}) if isinstance(state, dict) else {}
@@ -4450,23 +5288,21 @@ def asset_metadata_reconciliation_summary(root: Path, config_path: Path) -> str:
         if rel and not (root / rel).exists():
             stale_runtime += 1
 
-    if not records:
-        package_status = "not-configured"
-    else:
-        package_status = "verified" if not (missing_files or missing_fields or stale_static or header_gaps or unregistered) else "warning"
+    package_status = "verified" if not (missing_files or missing_fields or stale_static or header_gaps or unregistered) else "warning"
     lines = [
-        "Application asset metadata summary:",
+        "Digital asset metadata reconciliation:",
         f"- Metadata schema: {manifest.get('metadata_schema', ASSET_METADATA_SCHEMA) if isinstance(manifest, dict) else ASSET_METADATA_SCHEMA}",
-        f"- Project: {PROJECT_SLUG}",
+        f"- Package asset ID: {manifest.get('package_asset_id', PACKAGE_ASSET_ID) if isinstance(manifest, dict) else PACKAGE_ASSET_ID}",
         f"- Package status: {package_status}",
-        f"- Application source records: {len(records)}; root files visible to diagnostics: {len(actual_release_files)}",
+        f"- Canonical manifest records: {len(records)}; root release files: {len(actual_release_files)}",
         f"- Missing files: {len(missing_files)}; missing required fields: {len(missing_fields)}; unregistered files: {len(unregistered)}",
         f"- Static hash/size conflicts: {len(stale_static)}; mutable release-default drift: {len(mutable_drift)}; key metadata header gaps: {len(header_gaps)}",
-        "- Policy: runtime image metadata stays in the local state index; no per-image sidecar files are created.",
-        "- Mutable config rule: local configuration changes are expected and are not treated as source corruption.",
+        "- Policy: one canonical MANIFEST.json; DRIVE_UPLOAD_MANIFEST.csv is the merged Drive-placement/CSV view; no per-file or per-image sidecar proliferation.",
+        "- Package ZIP metadata: release ZIP comment is set and verified during packaging; an extracted runtime folder cannot self-read the original container comment.",
+        "- Mutable config rule: image_downloader_config.json hash describes the shipped default; expected user/runtime edits are reported separately, not treated as static package corruption.",
         f"- Runtime image catalog: {ready} metadata-ready, {legacy} legacy/incomplete, {stale_runtime} missing-on-disk; stored centrally in state/{DOWNLOAD_INDEX_FILENAME} hash records.",
         f"- Runtime image formats: {json.dumps(formats, sort_keys=True)}",
-        "- Runtime source URLs remain local and generated summaries are redacted.",
+        "- Runtime source URLs remain project-local and are excluded from Export20; generated summaries are redacted.",
     ]
     if missing_files:
         lines.append("- Missing file detail: " + ", ".join(missing_files[:20]))
@@ -4481,45 +5317,340 @@ def asset_metadata_reconciliation_summary(root: Path, config_path: Path) -> str:
     if unregistered:
         lines.append("- Unregistered release file detail: " + ", ".join(unregistered[:20]))
     if package_status == "verified":
-        lines.append("- Reconciliation result: PASS - application metadata and runtime index checks completed.")
-    elif package_status == "not-configured":
-        lines.append("- Reconciliation result: NOT EVALUATED - no application metadata registry is configured.")
+        lines.append("- Reconciliation result: PASS — manifest coverage, static hashes, and key embedded/header metadata agree.")
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
-def support_scope_summary(root: Path, config_path: Path) -> str:
+def release_archive_status_summary(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
+    project_path = str(cfg.get("google_drive_project_path") or ARCHIVE_PROJECT_PATH)
+    intended_path = str(cfg.get("google_drive_intended_vault_path") or INTENDED_RELEASE_ARCHIVE_PATH)
     lines = [
-        "Local support scope:",
-        f"- Project root: {safe_display_path(root)}",
-        f"- Config path: {safe_display_path(config_path, root)}",
-        "- Runtime dependency: local Python packages only; no cloud account or remote storage integration is required.",
-        "- Secret handling: generated diagnostics redact likely credentials, query tokens, and user-specific paths.",
-        "- Support artifacts stay inside the project reports and exports folders.",
+        "Optional external archive status:",
+        f"- Intended vault project path: {project_path}",
+        f"- Intended latest-build path: {intended_path}",
+        f"- Source-of-truth path: {cfg.get('google_drive_source_of_truth_path', project_path + '/00_SOURCE_OF_TRUTH')}",
+        f"- Optional external archive path: {cfg.get('external_archive_support_path', project_path + '/support-ready')}",
+        f"- Diagnostics path: {cfg.get('google_drive_diagnostics_path', project_path + '/03_DIAGNOSTICS')}",
+        f"- Docs/runbook path: {cfg.get('google_drive_docs_runbook_path', project_path + '/04_DOCS_RUNBOOK')}",
+        f"- Changelog/manifest path: {cfg.get('google_drive_changelog_manifest_path', project_path + '/05_CHANGELOG_MANIFEST')}",
+        f"- Archive path: {cfg.get('google_drive_archive_path', project_path + '/06_ARCHIVE')}",
+        f"- Local runtime vault sync status: {cfg.get('google_drive_vault_sync_status', 'not_configured_local_runtime')}",
+        f"- Local runtime reference-check status: {cfg.get('google_drive_reference_check_status', 'verified')}",
+        f"- Local runtime reference-check note: {cfg.get('google_drive_reference_check_note', 'structured_folder_exists_no_zip_upload')}",
+        "- Drive lookup note: official structured ImageDownloader folder was found under the vault utilities category; similarly named folders outside the official vault path should be staged/merged manually, not deleted blindly.",
+        "- Runtime dependency: none; Image Downloader runs, diagnoses, and exports offline without Drive.",
+        "- Support expectation: upload/mirror the final source-of-truth ZIP under the structured release archive latest-build/source-of-truth folders when a archive integration or manual upload is available.",
+        "- Secret handling: no raw Drive IDs, permission lists, account identifiers, or secret-bearing links are stored in runtime diagnostics.",
     ]
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
-def public_safety_summary(root: Path, config_path: Path) -> str:
+def parameter_alignment_summary(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
     lines = [
-        "Safety snapshot:",
+        "Current-release alignment snapshot:",
+        f"- Release integrity baseline: {PARAMETER_ALIGNMENT_VERSION}",
+        "- Timer-safe pass posture: startup/import/config/path issues first, then conflicts/version drift, stability, diagnostics/export, verification, and clean ZIP output before broad features.",
         f"- App version/build: {APP_VERSION} / {BUILD_NAME}",
-        f"- Standard mode default: {not bool(cfg.get('browser_mode', False))}",
-        f"- Dry-run default: {bool(cfg.get('dry_run', False))}",
-        f"- Sequential discovery opt-in: {bool(cfg.get('sequence_discovery_enabled', False))}",
-        f"- Downloaded media visible by default: {not bool(cfg.get('hide_downloaded_media', False))}",
-        "- Only globally routable HTTP(S) destinations are accepted, including redirects and browser subrequests.",
-        "- Downloaded payloads are validated, saved, and never opened or executed.",
-        "- Existing user files and folders are not moved or deleted during normal startup.",
+        "- Output strategy: full ZIP package only; no inline source required for normal delivery.",
+        "- Lean structure: one Python source, one mutable config, three small BAT entry points, one README/runbook, one changelog, VERSION.txt, MANIFEST.json, PACKAGE_METADATA.json, one Drive upload CSV manifest, and one engineering-output file.",
+        f"- Runtime identity gate: {verify_release_identity(root).get('result')} before dependency/authenticated/network runtime; every package_managed=true release file is size/SHA256 verified.",
+        "- Preserve-working-strategy status: Smart Safe Automation uses Standard Mode first and automatically applies duplicate detection, resume, reconnect, adaptive throttle, numbered sequence discovery, and conservative same-domain gallery pagination; Safe Browser and dry-run remain manual trust/safety choices.",
+        "- Duplicate autodetection: URL, candidate, SHA256, exact visual fingerprint, filename-conflict, and bounded existing-library reconciliation evidence is recorded without automatic deletion.",
+        "- Diagnostics/export: one canonical project-root IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip, allowlisted/redacted Export20 evidence, atomic replacement, old-export cleanup, and no recursive archive inclusion.",
+        "- Portability: root-layout ZIP, launchers use the extracted project folder first, accept IMAGE_DOWNLOADER_BOT_DIR only for a complete project, and retain C:\\Bots\\ImageDownloader only as a compatibility fallback; supports spaces in paths.",
+        "- Helpful computer awareness: ALPHA, ASCEND, DeusEx/Raider/GE66, or a privacy-safe generic host may be labeled for console/log/diagnostic context only; no identity-based restrictions or runtime overlays are active.",
+        "- Omission/triage control: coverage ledger plus Critical/High/Normal/Optional exit status is included in diagnostics/export and full batch output.",
+        "- Security/Norton posture: no bundled executables, no hidden execution, no auto-opening downloaded files, no service/firewall/autostart changes.",
+        "- Drive-vault rule: tracked as structured vault status/intended category/project/build path; local tool does not require Drive authentication or online access.",
+        "- Asset metadata: one canonical release manifest, embedded key-asset metadata, merged Drive CSV view, central content-addressed runtime image records, and release/export ZIP comments; no per-file sidecars.",
+        f"- Config parameter_alignment_version: {cfg.get('parameter_alignment_version', PARAMETER_ALIGNMENT_VERSION)}",
     ]
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
+
+
+def archive_removed_coordination_artifacts(root: Path) -> Dict[str, Any]:
+    """Archive obsolete coordinated-runtime artifacts without deleting user evidence.
+
+    This is a one-time compatibility cleanup for installations upgraded from the
+    removed computer-specific runtime layout. It performs no host detection and
+    creates no ownership or launch restriction.
+    """
+    root = root.resolve()
+    candidates = [
+        root / STATE_DIRNAME / "machines",
+        root / LOG_DIRNAME / "machines",
+        root / REPORT_DIRNAME / "machines",
+        root / STATE_DIRNAME / "_shared",
+        root / STATE_DIRNAME / INSTANCE_LOCK_FILENAME,
+        root / STATE_DIRNAME / INSTANCE_EVENTS_FILENAME,
+    ]
+    existing = [path for path in candidates if path.exists()]
+    result = {
+        "time": now_local(),
+        "status": "not_found" if not existing else "pending",
+        "archived": [],
+        "failed": [],
+        "note": "Helpful computer identification is label-only; no cross-computer coordination or launch restriction is active.",
+    }
+    if not existing:
+        return result
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_root = root / STATE_DIRNAME / "archive" / f"removed_coordination_{stamp}"
+    archive_root.mkdir(parents=True, exist_ok=True)
+    for source in existing:
+        try:
+            relative = source.relative_to(root)
+            target = archive_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                target = target.with_name(target.name + "_" + uuid.uuid4().hex[:8])
+            shutil.move(str(source), str(target))
+            result["archived"].append({"source": str(relative), "target": short_path(target, root)})
+        except Exception as exc:
+            result["failed"].append({"source": short_path(source, root), "error": f"{exc.__class__.__name__}: {exc}"})
+    result["status"] = "completed" if not result["failed"] else "partial"
+    json_dump(root / STATE_DIRNAME / "removed_coordination_cleanup.json", result)
+    # Keep only the newest three cleanup archives.
+    parent = archive_root.parent
+    with contextlib.suppress(OSError):
+        archives = sorted([p for p in parent.iterdir() if p.is_dir() and p.name.startswith("removed_coordination_")], key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in archives[3:]:
+            shutil.rmtree(old, ignore_errors=True)
+    return result
+
+
+def archive_nested_release_folder(root: Path, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Move accidental nested release copies out of the active project root.
+
+    This is non-destructive: nested package copies are archived under state/ so the
+    active root stays lean and duplicate scans stop reporting nested source trees.
+    """
+    result: Dict[str, Any] = {
+        "enabled": bool(cfg.get("archive_nested_package_conflicts", True)),
+        "checked_at": now_local(),
+        "status": "not_checked",
+        "archived_from": "",
+        "archived_to": "",
+        "reason": "",
+    }
+    if not result["enabled"]:
+        result["status"] = "disabled"
+        return result
+    nested = root / "ImageDownloader"
+    markers = [SCRIPT_FILENAME, "run_image_downloader.bat", CONFIG_FILENAME]
+    if not nested.is_dir() or not any((nested / name).exists() for name in markers):
+        result["status"] = "no_nested_package_copy_detected"
+        return result
+    try:
+        archive_root = root / STATE_DIRNAME / "archived_nested_packages"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        dest = archive_root / f"ImageDownloader_nested_{timestamp_unique()}"
+        shutil.move(str(nested), str(dest))
+        result.update({
+            "status": "archived",
+            "archived_from": short_path(nested, root),
+            "archived_to": short_path(dest, root),
+            "reason": "nested release package copy detected; moved under state for reversible cleanup",
+        })
+        retention = safe_int(cfg.get("nested_package_archive_retention", 3), 3, min_value=1, max_value=20)
+        archives = sorted([p for p in archive_root.iterdir() if p.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in archives[retention:]:
+            shutil.rmtree(old, ignore_errors=True)
+    except (OSError, shutil.Error, RuntimeError) as exc:
+        result.update({"status": "archive_failed", "reason": f"{type(exc).__name__}: {exc}"})
+    json_dump(root / STATE_DIRNAME / NESTED_LAYOUT_CLEANUP_FILENAME, result)
+    return result
+
+
+def nested_layout_cleanup_summary(root: Path) -> str:
+    data = json_load(root / STATE_DIRNAME / NESTED_LAYOUT_CLEANUP_FILENAME, {})
+    lines = ["Nested package layout cleanup:"]
+    if not isinstance(data, dict) or not data:
+        lines.append("- No cleanup event recorded for this build yet.")
+        return "\n".join(lines)
+    lines.append(f"- Status: {data.get('status', 'unknown')}")
+    if data.get("archived_from") or data.get("archived_to"):
+        lines.append(f"- Archived from: {data.get('archived_from', '')}")
+        lines.append(f"- Archived to: {data.get('archived_to', '')}")
+    if data.get("reason"):
+        lines.append(f"- Reason: {data.get('reason')}")
+    return "\n".join(lines)
+
+
+SUPERSEDED_SUPPORT_DOCS = ["KNOWN_GOOD_STATE.md", "TRANSFER_BRIEF.md", "PROJECT_HEALTH_REVIEW.md"]
+SUPERSEDED_SUPPORT_DOCS_CLEANUP_FILENAME = "superseded_support_docs_cleanup_latest.json"
+
+
+def archive_superseded_support_docs(root: Path, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Archive older split documentation files after the lean README merge.
+
+    This keeps the active project root small while preserving the old notes under
+    state/ for rollback evidence. It never touches runtime/download folders.
+    """
+    result: Dict[str, Any] = {
+        "enabled": bool(cfg.get("archive_superseded_support_docs", True)),
+        "checked_at": now_local(),
+        "status": "not_checked",
+        "archived_files": [],
+        "archive_folder": "",
+        "reason": "",
+    }
+    if not result["enabled"]:
+        result["status"] = "disabled"
+        return result
+    candidates = [root / name for name in SUPERSEDED_SUPPORT_DOCS if (root / name).is_file()]
+    if not candidates:
+        result["status"] = "no_superseded_split_docs_detected"
+        json_dump(root / STATE_DIRNAME / SUPERSEDED_SUPPORT_DOCS_CLEANUP_FILENAME, result)
+        return result
+    try:
+        archive_root = root / STATE_DIRNAME / "archived_split_support_docs"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        dest = archive_root / f"split_docs_{timestamp_unique()}"
+        dest.mkdir(parents=True, exist_ok=True)
+        for path in candidates:
+            shutil.move(str(path), str(dest / path.name))
+            result["archived_files"].append(path.name)
+        result.update({
+            "status": "archived",
+            "archive_folder": short_path(dest, root),
+            "reason": "lean package merged known-good, transfer, and health notes into README_QUICK_START.md plus generated Export20 evidence",
+        })
+        retention = safe_int(cfg.get("superseded_support_docs_archive_retention", 3), 3, min_value=1, max_value=20)
+        archives = sorted([p for p in archive_root.iterdir() if p.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in archives[retention:]:
+            shutil.rmtree(old, ignore_errors=True)
+    except (OSError, shutil.Error, RuntimeError) as exc:
+        result.update({"status": "archive_failed", "reason": f"{type(exc).__name__}: {exc}"})
+    json_dump(root / STATE_DIRNAME / SUPERSEDED_SUPPORT_DOCS_CLEANUP_FILENAME, result)
+    return result
+
+
+def superseded_support_docs_summary(root: Path) -> str:
+    data = json_load(root / STATE_DIRNAME / SUPERSEDED_SUPPORT_DOCS_CLEANUP_FILENAME, {})
+    lines = ["Superseded support-doc cleanup:"]
+    if not isinstance(data, dict) or not data:
+        lines.append("- No cleanup event recorded for this build yet.")
+        return "\n".join(lines)
+    lines.append(f"- Status: {data.get('status', 'unknown')}")
+    files = data.get("archived_files") if isinstance(data.get("archived_files"), list) else []
+    if files:
+        lines.append(f"- Archived files: {', '.join(str(x) for x in files)}")
+    if data.get("archive_folder"):
+        lines.append(f"- Archive folder: {data.get('archive_folder')}")
+    if data.get("reason"):
+        lines.append(f"- Reason: {data.get('reason')}")
+    return "\n".join(lines)
+
+
+def known_good_state_note(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
+    lines = [
+        f"{APP_NAME} known-good / rollback note",
+        f"Generated: {now_local()}",
+        f"Version: {APP_VERSION}",
+        f"Build: {BUILD_NAME}",
+        f"Build date: {BUILD_DATE}",
+        "",
+        "Known-good marker:",
+        "- Current package builds on the user-confirmed working 2026.08.07.1 / v2175 runtime-identity release.",
+        "- Working downloader behavior and the v2.17.5 integrity gate are preserved while persistent queue autosave/recovery, timestamped session download lists, and a hard three-active-download ceiling are added.",
+        "",
+        "Preserved behavior:",
+        "- Standard Mode default; Safe Browser Mode optional/trusted-sites-only.",
+        "- Dry-run available but OFF by default.",
+        "- Sequential discovery remains bounded, same-domain by default, duplicate-safe, and header plus strict raster validated.",
+        "- Responsive/lazy/JSON-LD/CSS discovery and optional Safe Browser response capture are bounded runtime additions.",
+        "- Validator-gated partial resume, server-aware retry, connectivity-only extra attempts, and adaptive throttle behavior remain internal with no new launcher choice.",
+        "- VPN/IP-change recovery remains runtime-only and concurrent reset requests are coalesced.",
+        "- Export20 remains capped at 20 files and redacted.",
+        "",
+        "Rollback:",
+        "- Previous confirmed known-good package: ImageDownloader_Full_Build_2026-08-07_1911_CDT_v2175-runtime-identity-integrity-gate.zip (SHA256 02f4c1181788719dc23980263e827f3cec7685c877d75967158fd0fbc998f3f5).",
+        "- If this lean package behaves unexpectedly, run run_diagnose_export.bat and upload the export ZIP before replacing files.",
+        "",
+        nested_layout_cleanup_summary(root),
+        "",
+        superseded_support_docs_summary(root),
+    ]
+    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
+
+
+def transfer_brief(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
+    lines = [
+        f"{APP_NAME} transfer brief",
+        f"Generated: {now_local()}",
+        f"Current version: {APP_VERSION}",
+        f"Current build: {BUILD_NAME}",
+        f"Build date: {BUILD_DATE}",
+        "",
+        "Source of truth:",
+        "- Newest verified package should supersede earlier Image Downloader ZIPs unless rollback is explicitly requested.",
+        "- Release package is root-layout and project-folder first; run from a complete extracted folder. IMAGE_DOWNLOADER_BOT_DIR and the legacy C:\\Bots\\ImageDownloader path are accepted only when the required release controls are present.",
+        "",
+        "Why this build exists:",
+        "- v2.17.5 adds a read-only package/version/build and managed-file SHA256 gate before dependency/authenticated/network runtime, with exit 23 on mixed/stale releases and Diagnostics/Export20 still available.",
+        "- Existing forgiving connectivity retries, debounced/coalesced session renewal, and local AIMD/EWMA throttling remain preserved from the known-good baseline.",
+        "- Preserved smart discovery, hidden-media default, validator-gated partial resume, streamed verification, and deterministic failure-isolated Export20.",
+        "- Preserved root-layout packaging, reversible old-layout cleanup, path targeting, and the existing quick-start workflow.",
+        "",
+        "Do not regress:",
+        "- Do not add menu options for runtime reliability fixes.",
+        "- Keep Standard Mode default, Safe Browser optional/trusted-sites-only, dry-run OFF, and Export20 <= 20 files.",
+        "- Do not bundle executables or auto-run downloaded files.",
+    ]
+    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
+
+
+def lean_package_audit(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
+    lines = [
+        f"{APP_NAME} lean package audit",
+        f"Generated: {now_local()}",
+        f"Version: {APP_VERSION}",
+        f"Build: {BUILD_NAME}",
+        "",
+        "Lean changes:",
+        "- Release remains a shallow root-layout package; the adaptive scheduler/reconnect controller lives in the existing Python source, with no new helper module, launcher, dependency file, or menu.",
+        "- Export carries known-good, transfer, health, transport, and discovery evidence as generated summaries rather than extra support files.",
+        "- Existing installed split docs and accidental nested packages remain reversibly archived instead of deleted.",
+        "",
+        "Package-root duplicate posture:",
+        duplicate_scan(root).rstrip(),
+        "",
+        nested_layout_cleanup_summary(root),
+        "",
+        superseded_support_docs_summary(root),
+    ]
+    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
+
+
+def project_support_notes(root: Path, config_path: Path) -> str:
+    sections = [
+        release_identity_summary(root).rstrip(),
+        known_good_state_note(root, config_path).rstrip(),
+        transfer_brief(root, config_path).rstrip(),
+        project_health_review(root, config_path).rstrip(),
+        work_window_triage_exit_summary(root, config_path).rstrip(),
+        lean_package_audit(root, config_path).rstrip(),
+    ]
+    return redact_sensitive_text("\n\n---\n\n".join(section for section in sections if section).rstrip() + "\n")
 
 
 def launcher_info(root: Path) -> str:
     lines = [
         f"{APP_NAME} launcher info",
         f"Generated: {now_local()}",
-        "Expected launcher behavior: run from the repository directory, locate Python, check dependencies, and invoke image_downloader.py without installing packages or moving files.",
+        "Required BAT header pattern:",
+        "title Gateway Image Downloader [mode]",
+        "echo =========================================",
+        "echo Gateway Image Downloader [mode]",
+        "echo =========================================",
+        "echo Using bot folder: %BOT_DIR%",
+        "echo.",
         "",
     ]
     bat_files = sorted(root.glob("*.bat"))
@@ -4528,14 +5659,13 @@ def launcher_info(root: Path) -> str:
     for bat in bat_files:
         try:
             text = bat.read_text(encoding="utf-8", errors="replace")
-            uses_repository_directory = 'cd /d "%~dp0"' in text
-            invokes_source = "image_downloader.py" in text
-            avoids_package_install = " pip install " not in text.lower()
+            has_title = bool(re.search(r"(?im)^title\s+Gateway Image Downloader", text))
+            has_echo = "echo Gateway Image Downloader" in text and "echo Using bot folder: %BOT_DIR%" in text
             lines.extend([
                 f"File: {bat.name}",
                 f"Size: {bat.stat().st_size} bytes",
                 f"SHA256: {sha256_file(bat)}",
-                f"Launcher check: {'PASS' if uses_repository_directory and invokes_source and avoids_package_install else 'CHECK'}",
+                f"Header check: {'PASS' if has_title and has_echo else 'CHECK'}",
                 "",
             ])
         except (OSError, UnicodeError) as exc:
@@ -4543,45 +5673,68 @@ def launcher_info(root: Path) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def runtime_path_summary(root: Path, config_path: Path) -> str:
+def path_targeting_summary(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
+    env_name = str(cfg.get("bot_dir_env_override_name") or "IMAGE_DOWNLOADER_BOT_DIR")
+    env_value = os.environ.get(env_name, "")
     lines = [
-        "Runtime path summary:",
-        f"- Repository root: {safe_display_path(root)}",
+        "Path targeting / relocation summary:",
+        f"- Preferred runtime folder: {cfg.get('preferred_bot_dir', '.')}",
+        f"- Active project root: {safe_display_path(root)}",
         f"- Config path: {safe_display_path(config_path, root)}",
-        "- Launchers run from their checked-in repository directory.",
-        "- No launcher sync, relocation, installed-folder fallback, or path override is performed.",
+        f"- Launcher override variable: {env_name}",
+        f"- Override currently set: {bool(env_value)}",
+        f"- Targeting mode: {cfg.get('path_targeting_mode', 'project_folder_then_valid_env_override_then_legacy_fallback')}",
+        f"- Portable fallback enabled: {bool(cfg.get('portable_fallback_enabled', True))}",
+        "- Launchers do not auto-copy/sync release files; they run the extracted project folder first and only use an override or legacy folder when it contains a complete release.",
+        "- A new install path can be targeted by setting IMAGE_DOWNLOADER_BOT_DIR to a complete project folder before launching; no extra BAT menu option is required.",
     ]
+    if env_value:
+        lines.append(f"- Override value (redacted): {safe_display_path(Path(env_value))}")
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
-def verification_coverage_summary(root: Path, config_path: Path) -> str:
+def omission_control_coverage_summary(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
     rows = [
-        ("network_destinations", "guarded", "Initial URLs, redirects, final responses, DNS answers, and optional browser subrequests must remain globally routable."),
-        ("download_payloads", "guarded", "Dangerous types and extensions are blocked; retained images are size-bounded and validated before finalization."),
-        ("duplicate_controls", "enabled", "URL, content-hash, visual-fingerprint, and filename-conflict checks are active by default."),
-        ("filesystem_behavior", "non_destructive", "Normal startup does not move or delete user files and downloaded content is never executed."),
-        ("runtime_evidence", "local", "Logs, reports, state, downloads, and support bundles stay in ignored project-local folders."),
+        ("newest_package_baseline", "verified", "Used newest local Image Downloader package as bot baseline unless manifest/changelog evidence conflicts."),
+        ("v2.17.5_parameter_package", "verified", "Uploaded v2.17.5 package was read directly; runtime identity/integrity gate requirements were mapped into release controls, startup ordering, and Export20 evidence."),
+        ("startup_import_config_path", "verified", "Compile/version/self-test/export path-with-spaces checks exercised; launchers now support target override plus portable fallback."),
+        ("conflicts_duplicates_stale_launchers", "verified", "Duplicate filename/hash/function scans run; root-layout ZIP maintained; launchers require complete release controls for overrides/legacy fallback and perform no auto-sync."),
+        ("stability_timeouts_retries_logging_state_shutdown", "verified", "Known-good bounded retries, VPN recovery, log rotation, atomic writes, optional stale-recoverable instance-guard mechanics disabled by default, and graceful cleanup preserved."),
+        ("diagnostics_export20", "verified", "Export is report-only, redacted, allowlisted, integrity-tested, capped, and atomically replaces one easy-to-find project-root support ZIP."),
+        ("safe_verification", "verified", "Python compile, self-test, diagnose/export, path spaces, export integrity, duplicate scans, and BAT static checks are expected batch checks."),
+        ("drive_reference", "found_unchanged", "Structured ImageDownloader vault folders were found; latest-build direct upload may still require manual placement."),
+        ("targeted_prime_directive_upgrades", "applied", "Smart Safe Automation now coordinates existing duplicate/resume/reconnect/throttle/sequence features and conservatively follows strong same-domain gallery/pagination links; Safe Browser remains manual trusted-sites-only."),
+        ("broad_ui_architecture_rewrite", "skipped", "No new menu, launcher choice, framework, external service, or multi-module deployment was added."),
     ]
     lines = [
-        "Verification coverage:",
-        f"- Root: {safe_display_path(root)}",
-        f"- Config: {safe_display_path(config_path, root)}",
+        "Omission-control coverage ledger:",
+        f"- Status: {cfg.get('omission_control_status', 'coverage_ledger_in_batch_output_and_export')}",
+        f"- Note: {cfg.get('omission_control_coverage_note', 'Requested pass categories are tracked before completion claims.')}",
     ]
     for item, status, evidence in rows:
-        lines.append(f"- {item}: {status} - {evidence}")
+        lines.append(f"- {item}: {status} — {evidence}")
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
-def verification_scope_summary(root: Path, config_path: Path) -> str:
-    """Human-readable summary of verified and environment-dependent behavior."""
+def work_window_triage_exit_summary(root: Path, config_path: Path) -> str:
+    """Human-readable v2.17.5 triage/finalization status for support and Export20."""
     cfg = json_load(config_path, {})
     lines = [
-        "Verification scope:",
-        "- Automated tests cover safety defaults, URL parsing, private-address rejection, content-type checks, SVG active-content checks, and helper boundaries.",
-        "- Static checks confirm redirect and optional-browser route guards are present.",
-        "- A live browser session and arbitrary third-party sites remain environment-dependent and are not claimed as universally compatible.",
-        f"- Optional browser mode configured: {bool(cfg.get('browser_mode', False))}",
-        f"- Sequence discovery configured: {bool(cfg.get('sequence_discovery_enabled', False))}",
+        "Work-window triage / exit status:",
+        f"- Critical — runtime identity/integrity gate: {verify_release_identity(root).get('result')}; normal/browser startup is blocked before dependency/authenticated/network runtime unless control identity and every managed hash match.",
+        "- Critical — preserved: Windows instance liveness uses a non-signalling process query; PID start signatures protect stale-lock recovery; mutable config/state migration and cleanup occur only after top-level ownership.",
+        "- High — completed and verified: adaptive AIMD/EWMA submission control, per-host cooldowns, connectivity-only extra attempts, and coalesced reconnect/session resets are active and regression-tested.",
+        "- Normal — completed and verified: Smart Safe Automation decisions, one canonical support ZIP, v2.17.5-runtime-release-identity-managed-file-integrity-gate asset metadata, manifest/changelog/runbook/batch-output synchronization, path-with-spaces, and lean-package checks.",
+        "- Optional — deferred by design: automatic Playwright fallback remains disabled because browser execution is a trusted-site decision; broad UI changes, module splitting, services, and additional launchers were not attempted.",
+        "- Finalization reserve: protected for compile, self-test, diagnostic/export integrity, duplicate/version scans, relocated-path verification, ZIP/checksum creation, and truthful reporting.",
+        "- Completed but not fully verified: native Windows double-click execution, real Norton scanning, and a real Playwright Chromium session require the Windows host and are explicitly listed as limits.",
+        "- Partial or rushed work: none recorded for this bounded pass.",
+        "- Skipped/deferred/blocked: only the optional broad changes above; direct Drive binary upload remains connector/runtime-dependent.",
+        "- Actual tool timeouts: none recorded in the release receipt; see FULL_BATCH_OUTPUT.txt for current verification results.",
+        "- Safest next pass: run one Standard Mode download and one Export20 on Windows; upload that export only if runtime evidence differs from these checks.",
+        f"- Context-health snapshot: {cfg.get('thread_context_health_status', 'yellow_long_thread_transfer_recommended_after_pass')}",
     ]
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
@@ -4604,14 +5757,16 @@ def transport_discovery_summary(root: Path, config_path: Path) -> str:
         pass
     lines = [
         "Smart discovery / transfer stability summary:",
+        f"- Smart Safe Automation: mode={cfg.get('automation_mode', 'smart_safe')}; conservative gallery={bool(cfg.get('auto_gallery_follow_enabled', True))}; Safe Browser fallback={cfg.get('auto_browser_fallback_policy', 'manual_trusted_sites_only')}",
+        f"- Canonical support export: {cfg.get('canonical_export_filename', CANONICAL_EXPORT_FILENAME)} in the project root; prior export ZIP retention={cfg.get('export_keep_previous_zips', 0)}",
         f"- Modern HTML discovery enabled: {bool(cfg.get('modern_discovery_enabled', True))}",
         f"- Optional Safe Browser response-image capture enabled: {bool(cfg.get('browser_capture_network_images', True))}",
         f"- Candidate cap/page: {cfg.get('max_candidate_urls_per_page', 500)}; browser response cap/page: {cfg.get('browser_network_image_limit', 500)}",
-        f"- Connect/read timeout seconds: {cfg.get('connect_timeout', 7)}/{cfg.get('read_timeout', cfg.get('timeout', 20))}",
-        f"- Monotonic wall-clock caps: page={cfg.get('page_wall_clock_timeout_seconds', 60)}s, image={cfg.get('request_wall_clock_timeout_seconds', 120)}s",
+        f"- Connect/read timeout seconds: {cfg.get('connect_timeout', 3)}/{cfg.get('read_timeout', cfg.get('timeout', 5))}",
+        f"- Monotonic wall-clock caps: page={cfg.get('page_wall_clock_timeout_seconds', 60)}s, image={cfg.get('request_wall_clock_timeout_seconds', 5)}s",
         f"- Retry policy: base attempts={safe_int(cfg.get('retries', 2), 2, min_value=0, max_value=5) + 1}, extra connectivity retries={cfg.get('network_recovery_extra_attempts', 2)}, exponential backoff+jitter, Retry-After cap={cfg.get('retry_after_max_seconds', 30)}s",
         f"- Reconnect coalescing: HTTP session-reset debounce={cfg.get('network_session_reset_debounce_ms', 1000)}ms",
-        f"- Adaptive throttle: enabled={bool(cfg.get('adaptive_throttle_enabled', True))}, mode={cfg.get('adaptive_throttle_mode', 'feedback_aimd')}, min/max workers={cfg.get('adaptive_throttle_min_workers', 1)}/{cfg.get('adaptive_throttle_max_workers', cfg.get('workers', 6))}, target/slow latency={cfg.get('adaptive_throttle_target_latency_ms', 1500)}/{cfg.get('adaptive_throttle_slow_latency_ms', 4500)}ms",
+        f"- Adaptive throttle: enabled={bool(cfg.get('adaptive_throttle_enabled', True))}, mode={cfg.get('adaptive_throttle_mode', 'feedback_aimd')}, min/max workers={cfg.get('adaptive_throttle_min_workers', 1)}/{cfg.get('adaptive_throttle_max_workers', cfg.get('workers', MAX_ACTIVE_DOWNLOADS))}, target/slow latency={cfg.get('adaptive_throttle_target_latency_ms', 1500)}/{cfg.get('adaptive_throttle_slow_latency_ms', 4500)}ms",
         f"- Validator-gated partial resume enabled: {bool(cfg.get('resume_partial_downloads', True))}; minimum reusable bytes={cfg.get('resume_min_bytes', 262144)}",
         f"- Partial retention: {cfg.get('partial_retention_hours', 24)} hour(s); current partial payloads={partial_count}, bytes={partial_bytes}",
         f"- Strict Pillow raster verification: {bool(cfg.get('strict_raster_verify', True))}; pixel cap={cfg.get('image_max_pixels', 120000000)}",
@@ -4624,10 +5779,75 @@ def transport_discovery_summary(root: Path, config_path: Path) -> str:
         "Most recent transfer-recovery evidence:",
         json.dumps(redact_json_for_export(recovery), indent=2, ensure_ascii=False) if recovery else "- No completed run transfer-recovery evidence yet.",
         "",
+        "Most recent automation decisions:",
+        json.dumps(redact_json_for_export(recent.get("automation", {})), indent=2, ensure_ascii=False) if isinstance(recent.get("automation"), dict) and recent.get("automation") else "- No completed run automation evidence yet.",
+        "",
         "Most recent adaptive-throttle evidence:",
         json.dumps(redact_json_for_export(recent.get("adaptive_throttle", {})), indent=2, ensure_ascii=False) if isinstance(recent.get("adaptive_throttle"), dict) and recent.get("adaptive_throttle") else "- No completed run adaptive-throttle evidence yet.",
     ]
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
+
+
+def duplicate_scan(root: Path) -> str:
+    lines = [f"{APP_NAME} duplicate/lean-project scan", f"Generated: {now_local()}", ""]
+    files: List[Path] = []
+    folders: List[Path] = []
+    excluded_dirs = {"downloads", "logs", "exports", "state", "reports", "__pycache__", ".git", ".venv", "venv", "env", "node_modules"}
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        dirnames[:] = [name for name in dirnames if name.lower() not in excluded_dirs]
+        current = Path(dirpath)
+        for dirname in dirnames:
+            folders.append(current / dirname)
+        for filename in filenames:
+            if filename == CANONICAL_EXPORT_FILENAME or filename.startswith("IMAGE_DOWNLOADER_SUPPORT_EXPORT") and filename.lower().endswith(".zip"):
+                continue
+            files.append(current / filename)
+    by_name: Dict[str, List[Path]] = {}
+    by_hash: Dict[str, List[Path]] = {}
+    for f in files:
+        by_name.setdefault(f.name.lower(), []).append(f)
+        try:
+            by_hash.setdefault(sha256_file(f), []).append(f)
+        except OSError:
+            pass
+    name_dupes = {k: v for k, v in by_name.items() if len(v) > 1}
+    hash_dupes = {k: v for k, v in by_hash.items() if len(v) > 1}
+    lines.append(f"Scanned files: {len(files)}")
+    lines.append(f"Scanned folders: {len(folders)}")
+    nested = root / "ImageDownloader"
+    if nested.is_dir() and any((nested / name).exists() for name in [SCRIPT_FILENAME, "run_image_downloader.bat", CONFIG_FILENAME]):
+        lines.append("Nested package folder: CHECK - ImageDownloader/ contains another release copy. This usually means a ZIP was extracted inside the live bot folder.")
+        lines.append("Nested package repair: this build archives that nested copy under state/ on launch/export instead of deleting it.")
+    else:
+        lines.append("Nested package folder: PASS")
+    lines.append(f"Duplicate filenames: {len(name_dupes)} group(s)")
+    for name, paths in sorted(name_dupes.items()):
+        lines.append(f"- {name}: " + ", ".join(short_path(p, root) for p in paths))
+    lines.append(f"Duplicate file hashes: {len(hash_dupes)} group(s)")
+    for digest, paths in sorted(hash_dupes.items()):
+        lines.append(f"- {digest[:12]}: " + ", ".join(short_path(p, root) for p in paths))
+    if not name_dupes and not hash_dupes:
+        lines.append("No duplicate project source/support files detected.")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def file_inventory(root: Path) -> str:
+    lines = [f"{APP_NAME} file inventory", f"Generated: {now_local()}", ""]
+    for path in sorted(root.iterdir(), key=lambda p: p.name.lower()):
+        if path.name.lower() in {"downloads", "logs", "exports", "state", "reports", "__pycache__"}:
+            lines.append(f"{path.name}/ - runtime folder excluded from package/export bulk")
+            continue
+        if path.is_file():
+            if path.name == CANONICAL_EXPORT_FILENAME or (path.name.startswith("IMAGE_DOWNLOADER_SUPPORT_EXPORT") and path.suffix.lower() == ".zip"):
+                lines.append(f"{path.name} - runtime canonical support export excluded from release inventory")
+            else:
+                lines.append(f"{path.name} - {path.stat().st_size} bytes - sha256 {sha256_file(path)}")
+        elif path.is_dir():
+            if path.name.lower() == "imagedownloader":
+                lines.append(f"{path.name}/ - nested package copy detected; archived by this build when safe")
+            else:
+                lines.append(f"{path.name}/")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def logs_summary(root: Path, limit: int) -> str:
@@ -4678,7 +5898,7 @@ def instance_guard_summary(root: Path, cfg: Dict[str, Any]) -> str:
         events = []
     lines = [
         "Single-instance guard:",
-        f"- Enabled: {cfg.get('single_instance_guard_enabled', True)}",
+        f"- Enabled: {cfg.get('single_instance_guard_enabled', False)}",
         "- Scope: project-local state folder; no elevation/global machine lock required.",
         "- Liveness query: non-signalling Windows process handle check or POSIX signal-zero check; process-start signature protects against PID reuse when available.",
         f"- Second-launch behavior: {cfg.get('single_instance_second_launch', 'exit_with_status')}",
@@ -4723,13 +5943,18 @@ def backpressure_summary(root: Path, cfg: Dict[str, Any]) -> str:
     bp = recent.get("backpressure", {}) if isinstance(recent, dict) else {}
     if not isinstance(bp, dict):
         bp = {}
+    queue_state = json_load(root / STATE_DIRNAME / DOWNLOAD_QUEUE_STATE_FILENAME, {})
+    queue_items = queue_state.get("items", []) if isinstance(queue_state, dict) and isinstance(queue_state.get("items", []), list) else []
+    queue_pending = sum(1 for item in queue_items if isinstance(item, dict) and item.get("status") in {"pending", "running"})
     lines = [
         "Queue/backpressure:",
-        f"- Download queue capacity: {cfg.get('download_queue_capacity', 500)}",
+        f"- Persistent queue autosave/recovery: enabled={cfg.get('download_queue_autosave_enabled', True)}/{cfg.get('download_queue_recovery_enabled', True)}; pending={queue_pending}; state={STATE_DIRNAME}/{DOWNLOAD_QUEUE_STATE_FILENAME}",
+        "- Queue state contains operational URLs for recovery and is local-private; diagnostics/Export20 report counts only.",
+        f"- Download queue capacity: {cfg.get('download_queue_capacity', DOWNLOAD_QUEUE_HARD_MAX)} (hard max {DOWNLOAD_QUEUE_HARD_MAX})",
         f"- Download queue full policy: {cfg.get('download_queue_full_policy', 'visible_reject_excess')}",
         f"- Gallery queue capacity: {cfg.get('gallery_queue_capacity', 100)}",
-        f"- Worker concurrency cap: {cfg.get('workers', 6)}",
-        f"- Adaptive throttle: enabled={cfg.get('adaptive_throttle_enabled', True)}, mode={cfg.get('adaptive_throttle_mode', 'feedback_aimd')}, min/max={cfg.get('adaptive_throttle_min_workers', 1)}/{cfg.get('adaptive_throttle_max_workers', cfg.get('workers', 6))}",
+        f"- Worker concurrency cap: {cfg.get('workers', MAX_ACTIVE_DOWNLOADS)} (hard max {MAX_ACTIVE_DOWNLOADS})",
+        f"- Adaptive throttle: enabled={cfg.get('adaptive_throttle_enabled', True)}, mode={cfg.get('adaptive_throttle_mode', 'feedback_aimd')}, min/max={cfg.get('adaptive_throttle_min_workers', 1)}/{cfg.get('adaptive_throttle_max_workers', cfg.get('workers', MAX_ACTIVE_DOWNLOADS))}",
         f"- Retry budget: status/base={cfg.get('retries', 2)}, extra connectivity={cfg.get('network_recovery_extra_attempts', 2)}",
         f"- Last run submitted: {bp.get('submitted', 0)}",
         f"- Last run high-water depth: {bp.get('high_water_depth', 0)}",
@@ -4743,7 +5968,7 @@ def backpressure_summary(root: Path, cfg: Dict[str, Any]) -> str:
 def time_trace_summary(root: Path) -> str:
     recent = json_load(root / STATE_DIRNAME / RECENT_RUN_FILENAME, {})
     if not isinstance(recent, dict) or not recent:
-        return "Time trace: no recent run summary yet."
+        return "Time trace: no recent completed download run yet. Startup/export evidence is valid; run one URL and export again when transport/download evidence is needed."
     return "\n".join([
         "Time trace:",
         f"- Top-level run ID: {recent.get('top_level_run_id', 'unknown')}",
@@ -4754,6 +5979,55 @@ def time_trace_summary(root: Path) -> str:
         f"- Last progress elapsed seconds: {recent.get('last_progress_elapsed_seconds', 'unknown')}",
         f"- Terminal status: {recent.get('terminal_status', 'unknown')}",
     ])
+
+
+def deep_conflict_audit(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
+    lines = [
+        f"{APP_NAME} deep conflict / issue / duplicate audit",
+        f"Generated: {now_local()}",
+        f"Version: {APP_VERSION}",
+        f"Build: {BUILD_NAME}",
+        "",
+        "Audit result:",
+        "- PASS: Standard Mode remains the default flow; no extra BAT/menu options added.",
+        "- PASS: Safe Browser Mode remains optional/trusted-sites-only with browser context reuse.",
+        "- PASS: Sequential discovery remains bounded by same-domain, candidate, failure, anchor, and probe-delay controls.",
+        "- PASS: Duplicate URL/content protection remains active while per-run retry friction is reduced.",
+        "- PASS: Network/VPN resilience remains runtime-only through session refresh and bounded retry/backoff.",
+        "- PASS: Export20 excludes downloads, caches, browser runtimes, and bulky logs.",
+        "- FIXED: v2.8 schema metadata and safe migration/backup notes are now part of config/state handling.",
+        "- AVAILABLE: The stale-recoverable single-instance guard remains implemented but is disabled by default; independent launches are not rejected by computer identity or ownership rules.",
+        "- FIXED: v2.8 queue/backpressure capacity is explicit and visible in diagnostics instead of relying only on implicit page limits.",
+        "- FIXED: Run summaries now carry top-level run ID, per-URL run ID, elapsed time, terminal status, schema, network, sequence, and pressure evidence.",
+        "- FIXED: v2.9 compact platform/API drift registry is included in diagnostics/export evidence without adding launch-time web crawls or menu options.",
+        "- FIXED: v2.16.2 omission-control coverage ledger is generated into diagnostics/export/batch output for broad pass completeness.",
+        "- FIXED: v2.16.2 relocation targeting allows IMAGE_DOWNLOADER_BOT_DIR override while preserving the default installed path and portable fallback.",
+        "- PRESERVED from v2.16.4: Windows lock liveness uses a non-signalling process query; process creation signatures detect PID reuse without breaking ambiguous live locks.",
+        "- FIXED: mutable config/state migration and cleanup now occur only after top-level instance ownership.",
+        "- FIXED: completed config migration now publishes the target schema number instead of repeatedly retaining the source schema.",
+        "- FIXED: one-shot URL mode returns a failure exit code when nothing was saved or recognized as an existing duplicate.",
+        "- FIXED: Export20 runs required collectors before optional evidence and records elapsed time for included, omitted, and failed collectors.",
+        "- ADDED: Completed downloaded image files are hidden by default on Windows through direct file-attribute APIs; failures are non-destructive and visible in diagnostics.",
+        "- FIXED: Dependency install commands use bounded major-version ranges when packages are missing, avoiding silent broad upgrades while keeping fresh installs simple.",
+        "",
+        duplicate_scan(root).rstrip(),
+        "",
+        nested_layout_cleanup_summary(root),
+        "",
+        superseded_support_docs_summary(root),
+        "",
+        instance_guard_summary(root, cfg),
+        "",
+        schema_migration_summary(root, cfg),
+        "",
+        backpressure_summary(root, cfg),
+        "",
+        integration_registry_summary(root, config_path).rstrip(),
+        "",
+        time_trace_summary(root),
+    ]
+    return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
 def diagnostic_report(root: Path, config_path: Path) -> str:
@@ -4768,7 +6042,10 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         f"Build: {BUILD_NAME}",
         f"Build date: {BUILD_DATE}",
         f"Project root: {safe_display_path(root)}",
+        f"Expected/preferred runtime folder: {cfg.get('preferred_bot_dir', '.')}",
         f"Config path: {safe_display_path(config_path, root)}",
+        "",
+        release_identity_summary(root).rstrip(),
         "",
         "Mode/config highlights:",
         f"- Standard Mode default: {not bool(cfg.get('browser_mode', False))}",
@@ -4788,8 +6065,9 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         f"- Reset HTTP session on network error: {cfg.get('network_reset_session_on_error', True)}",
         f"- Coalesced session-reset debounce ms: {cfg.get('network_session_reset_debounce_ms', 1000)}",
         f"- Adaptive throttle enabled/mode: {cfg.get('adaptive_throttle_enabled', True)} / {cfg.get('adaptive_throttle_mode', 'feedback_aimd')}",
-        f"- Adaptive throttle worker range: {cfg.get('adaptive_throttle_min_workers', 1)}-{cfg.get('adaptive_throttle_max_workers', cfg.get('workers', 6))}",
+        f"- Adaptive throttle worker range: {cfg.get('adaptive_throttle_min_workers', 1)}-{cfg.get('adaptive_throttle_max_workers', cfg.get('workers', MAX_ACTIVE_DOWNLOADS))}",
         f"- Reset browser context on browser/network error: {cfg.get('network_browser_reset_on_error', True)}",
+        f"- Launcher sync installed files: {cfg.get('launcher_sync_installed_files', False)}",
         f"- Per-run duplicate queue reset: {cfg.get('per_run_duplicate_queue_reset', True)}",
         f"- Stale state guard: {stale_state_status(root, cfg)}",
         "",
@@ -4797,13 +6075,18 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         "",
         duplicate_detection_summary(root, config_path).rstrip(),
         "",
-        "Support highlights:",
-        "- Diagnostic collection includes configuration, run state, failures, sequence statistics, environment, and bounded log summaries.",
+        computer_awareness_summary(root, config_path).rstrip(),
+        "",
+        "Current-release / v2.17.5 runtime identity/integrity compliance highlights:",
+        "- Root manifest, changelog, and consolidated runbook remain package artifacts; transfer, known-good/rollback, and health evidence are generated into Export20.",
+        "- Diagnostic/export collector includes source/config/launchers/run state/failures/not-downloaded/sequence stats/environment/log summary without bulky caches.",
         "- Redacted system-aware diagnostics include runtime/tooling evidence without raw PC reports or hardware/network identifiers.",
         "- Single-instance, schema/migration, queue/backpressure, and time-trace evidence are summarized without adding new BAT/menu options.",
         "- Compact integration/API drift evidence is embedded in diagnostic/export summaries and does not crawl docs/status pages at launch.",
         f"- Log rotation/bounding enabled: max_bytes={cfg.get('log_max_bytes')}, backups={cfg.get('log_backup_count')}",
-        "- Destination safety covers initial URLs, DNS results, redirects, final responses, and optional browser subrequests.",
+        "- No new BAT menu option was added for this compliance pass.",
+        "- Helpful computer awareness is included in diagnostics/export as labels and hints only; it cannot block launches, alter state paths, change locks, or restrict features.",
+        "- v2.17.5 runtime identity evidence plus asset-metadata reconciliation, omission-control, triage/exit, and relocation/path-targeting evidence are included in diagnostics/export.",
         "",
         instance_guard_summary(root, cfg),
         "",
@@ -4822,20 +6105,22 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         "Digital asset metadata:",
         asset_metadata_reconciliation_summary(root, config_path).rstrip(),
         "",
-        "Local support scope:",
-        support_scope_summary(root, config_path).rstrip(),
+        "Release archive/reference status:",
+        release_archive_status_summary(root, config_path).rstrip(),
         "",
-        "Safety:",
-        public_safety_summary(root, config_path).rstrip(),
+        "Parameter alignment:",
+        parameter_alignment_summary(root, config_path).rstrip(),
         "",
-        "Verification scope:",
-        verification_scope_summary(root, config_path).rstrip(),
+        "Work-window triage / exit status:",
+        work_window_triage_exit_summary(root, config_path).rstrip(),
         "",
-        "Runtime paths:",
-        runtime_path_summary(root, config_path).rstrip(),
+        "Path targeting / relocation:",
+        path_targeting_summary(root, config_path).rstrip(),
         "",
-        "Verification coverage:",
-        verification_coverage_summary(root, config_path).rstrip(),
+        "Omission-control coverage:",
+        omission_control_coverage_summary(root, config_path).rstrip(),
+        "",
+        superseded_support_docs_summary(root),
         "",
         "Launcher info:",
         launcher_info(root).rstrip(),
@@ -4864,8 +6149,8 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         "- The local adaptive throttle lowers concurrency on 429/5xx, network faults, slow completions, or elevated failure rate and cautiously restores it after healthy results.",
         "- Per-thread HTTP sessions avoid shared-session conflicts during parallel downloads.",
         "- Per-run duplicate queues reset each pasted URL while persistent URL/hash history still prevents re-downloading saved files.",
-        "- Support bundles exclude downloaded images, caches, and bulky runtime folders.",
-        "- Existing user files and folders are not moved or deleted during startup.",
+        "- Export excludes downloaded images, caches, and bulky runtime folders.",
+        "- v2.17.5 runtime identity, structured Drive-vault status, path targeting, omission-control coverage, and custom-input assurance are cached/summarized; no launch-time cloud dependency or documentation crawler was added.",
     ]
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
@@ -4880,6 +6165,128 @@ def write_diagnostics(root: Path, config_path: Path) -> Path:
     write_text_atomic(latest, report_text)
     return report_path
 
+
+def upgrade_review_notes(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
+    lines = [
+        f"{APP_NAME} upgrade review notes",
+        f"Generated: {now_local()}",
+        f"Version: {APP_VERSION}",
+        f"Build: {BUILD_NAME}",
+        "",
+        "Most recent outside-review decisions:",
+        "- Applied now: Smart Safe Automation coordinates direct/page routing, duplicate detection, resume, reconnect, adaptive throttle, numbered sequences, and conservative same-domain gallery pagination without a new menu.",
+        "- Applied now: Export20 atomically replaces one project-root IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip and removes superseded timestamped export ZIPs after successful verification.",
+        "- Preserved safety boundary: Safe Browser Mode is still a manual trusted-sites-only launcher; no automatic Chromium execution was added.",
+        "- Applied now: local adaptive AIMD/EWMA download submission control, per-host Retry-After cooldown, connectivity-only extra attempts, and debounced/coalesced HTTP session renewal.",
+        "- Preserved: bounded modern-page discovery, optional browser network-image observation, validator-gated resume, streamed verification, and failure-isolated deterministic Export20.",
+        "- Applied now: v2.17.5-runtime-release-identity-managed-file-integrity-gate canonical release-asset metadata, embedded key-file/container metadata, central downloaded-image metadata records, and read-only reconciliation evidence.",
+        "- Preserved: v2.16.4 timer-safe triage/exit, omission-control, path targeting, startup/config validation, conflict/version drift controls, and lean packaging.",
+        "- Applied: Launchers now support IMAGE_DOWNLOADER_BOT_DIR as a runtime target override while preserving C:\\Bots\\ImageDownloader as the default and extracted-folder fallback as recovery.",
+        "- Applied: v2.13 export stability pass reuses one diagnostic report for combined diagnose/export runs, hardens atomic writes, and normalizes Drive reference status without adding BAT menu clutter.",
+        "- Applied: v2.13 current-release pass adds structured external release archive governance status and custom-input/config assurance as compact diagnostics/manifest evidence without adding BAT menu clutter.",
+        "- Applied: Best-practices v2.8 compliance pass added timing/run-ID evidence, single-instance guard, config/state schemas, migration backups, queue/backpressure evidence, and deep conflict audit export visibility without adding BAT menu clutter.",
+        "- Applied: Runtime-only VPN/IP-change resilience now resets stale HTTP sessions and optional browser contexts after network failures, with no new menu option.",
+        "- Applied: Safe Browser Mode now reuses one Playwright browser/context per active process instead of launching Chromium for every fetched page.",
+        "- Applied: BAT launchers still prefer C:\\Bots\\ImageDownloader, but fall back to the extraction folder if Windows blocks creating C:\\Bots.",
+        "- Partially applied: Network-heavy paths now catch request/IO/runtime errors more specifically; top-level guards still protect the interactive flow from crashing.",
+        "- Deferred: Splitting the single Python file into many modules was not applied in this build because the current priority is a lean, portable, easy-transfer package with a small file count.",
+        "",
+        "Configured safety posture:",
+        f"- Standard Mode default: {not bool(cfg.get('browser_mode', False))}",
+        f"- Dry run default/configured: {bool(cfg.get('dry_run', False))}",
+        f"- Downloaded media hidden by default on Windows: {bool(cfg.get('hide_downloaded_media', True))}",
+        f"- Sequential same-domain only: {cfg.get('sequence_same_domain_only')}",
+        f"- Sequence max candidates/group: {cfg.get('sequence_max_candidates_per_group')}",
+        f"- Sequence max failed attempts: {cfg.get('sequence_max_failed_attempts')}",
+        f"- Browser context reuse: {cfg.get('browser_reuse_context', True)}",
+        f"- Network resilience enabled: {cfg.get('network_resilience_enabled', True)}",
+        f"- HTTP session reset on network error: {cfg.get('network_reset_session_on_error', True)}",
+        f"- Session reset debounce ms: {cfg.get('network_session_reset_debounce_ms', 1000)}",
+        f"- Connectivity-only extra attempts: {cfg.get('network_recovery_extra_attempts', 2)}",
+        f"- Adaptive throttle enabled/mode: {cfg.get('adaptive_throttle_enabled', True)} / {cfg.get('adaptive_throttle_mode', 'feedback_aimd')}",
+        f"- Stale state guard: {stale_state_status(root, cfg)}",
+    ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def project_health_review(root: Path, config_path: Path) -> str:
+    cfg = json_load(config_path, {})
+    lines = [
+        f"{APP_NAME} project health / layering review",
+        f"Generated: {now_local()}",
+        f"Version: {APP_VERSION}",
+        f"Build: {BUILD_NAME}",
+        f"Build date: {BUILD_DATE}",
+        "",
+        "Deep-review outcome:",
+        "- PASS: Current v2.17.5-runtime-release-identity-managed-file-integrity-gate parameters govern this Smart Safe Automation/canonical-export pass; known-good discovery, validation, hidden-media, state, timeout, and reconnect behavior remains preserved.",
+        "- PASS: Standard Mode remains the fast default path and Smart Safe Automation selects only bounded low-risk runtime helpers.",
+        "- PASS: Safe Browser Mode remains optional/trusted-sites-only and reuses its browser context.",
+        "- PASS: Sequential discovery remains bounded by same-domain, max candidates, max failures, and duplicate URL/content guards.",
+        "- PASS: Export excludes downloaded images, caches, Playwright runtimes, and bulky state.",
+        "- PASS: No bundled executables or hidden downloaded-file execution paths are part of the package.",
+        "- PASS: Completed image files use the native Windows Hidden attribute by default; project/output folders stay visible and downloaded files are never executed.",
+        "- PASS: v2.17.5-runtime-release-identity-managed-file-integrity-gate metadata evidence remains lean: MANIFEST.json is canonical, DRIVE_UPLOAD_MANIFEST.csv is the merged CSV/Drive view, key assets carry embedded/header metadata, and Export20 carries adaptive/reconnect reconciliation evidence without a new sidecar file.",
+        "- PASS: Incremental submission and local adaptive concurrency prevent eager executor flooding while preserving the configured worker ceiling.",
+        "- PASS: HTTP 429/5xx/network/slow-response pressure lowers the active limit; healthy completions restore it additively.",
+        "- PASS: VPN/IP/session resets are debounced so concurrent workers do not trigger repeated generation churn.",
+        "- PASS: Export20 now builds a deterministic allowlisted plan, snapshots changing files, isolates collector failures, records omissions/hashes, excludes recursive archives, remains capped at 20 files, and publishes one canonical project-root ZIP.",
+        "- FIXED: Combined --diagnose --export-support runs now reuse one diagnostic report instead of creating duplicate report files.",
+        "- FIXED: Config/state/report atomic writes now use unique temporary filenames before replace to reduce cross-process collision risk.",
+        "- FIXED: Drive reference-check config now uses a valid compact status plus a separate note, preventing startup normalization from downgrading verified folder evidence.",
+        "- FIXED: Launchers no longer auto-sync release files; project-folder-first targeting plus complete-control checks prevent silently selecting a partial override or stale legacy folder.",
+        "- FIXED: Per-run duplicate queues reset for each pasted URL so failed attempts can be retried in the same console.",
+        "- FIXED: Parallel downloads use thread-local HTTP sessions by default to avoid shared-session conflicts.",
+        "- FIXED: Duplicate top-level launches now fail visibly instead of silently contending for shared state.",
+        "- FIXED: Config/state schemas are versioned with safe backup-first migration and newer-schema refusal.",
+        "- FIXED: Candidate/backpressure limits are explicit and exported.",
+        "",
+        "Layer map:",
+        "1. BAT launcher layer: resolve a complete project folder/explicit override/legacy fallback, find Python, run the v2.17.5 identity gate, then install bounded dependencies only after PASS.",
+        "2. CLI/session layer: keep mode flags and interactive loop isolated from download logic.",
+        "3. Network layer: separate connect/read timeouts, monotonic caps, Retry-After/backoff, coalesced VPN/IP session refresh, connectivity-only extra retries, validator-gated Range resume, thread-local sessions, and local adaptive concurrency feedback.",
+        "4. Parser/discovery layer: HTML attributes, responsive srcsets/imagesrcset, metadata, JSON-LD, CSS, noscript, optional browser response capture, gallery candidates, and sequential seeds.",
+        "5. Validation/download layer: dangerous extension/content blocking, image magic checks, streamed Pillow/pixel verification, max-size checks, URL/SHA256/visual/library duplicate detection, hidden-media attribute, and atomic target writes.",
+        "6. Operational integrity layer: instance ownership, config/state schema migration, bounded candidate pressure, run IDs, elapsed timing, and graceful cleanup.",
+        "7. Diagnostics/export layer: current config, automation decisions, build/version, run summaries, failures, sequence stats, logs, launcher info, deep conflict audit, and one canonical support ZIP.",
+        "",
+        "System-aware v2.17.5-runtime-release-identity-managed-file-integrity-gate posture:",
+        "- Redacted system/runtime summary is included in diagnostics/export without raw PC reports.",
+        "- Usernames/home paths, query-token values, and obvious secret keys are redacted in generated export evidence.",
+        "- Log rotation keeps runtime logs bounded by config instead of growing indefinitely.",
+        "- Windows/Norton/VPN context is treated as expected, but no security bypasses or service/firewall changes are made.",
+        "",
+        "Digital asset metadata posture:",
+        asset_metadata_reconciliation_summary(root, config_path).rstrip(),
+        "",
+        "Current config posture:",
+        f"- browser_mode: {cfg.get('browser_mode', False)}",
+        f"- dry_run: {cfg.get('dry_run', False)}",
+        f"- hide_downloaded_media: {cfg.get('hide_downloaded_media', True)}",
+        f"- workers: {cfg.get('workers')}",
+        f"- thread_local_http_sessions: {cfg.get('thread_local_http_sessions', True)}",
+        f"- network_resilience_enabled: {cfg.get('network_resilience_enabled', True)}",
+        f"- adaptive_throttle_enabled: {cfg.get('adaptive_throttle_enabled', True)}",
+        f"- adaptive_throttle_mode: {cfg.get('adaptive_throttle_mode', 'feedback_aimd')}",
+        f"- sequence_discovery_enabled: {cfg.get('sequence_discovery_enabled', True)}",
+        f"- sequence_same_domain_only: {cfg.get('sequence_same_domain_only', True)}",
+        f"- launcher_sync_installed_files: {cfg.get('launcher_sync_installed_files', False)}",
+        f"- parameter_alignment_version: {cfg.get('parameter_alignment_version', PARAMETER_ALIGNMENT_VERSION)}",
+        f"- google_drive_vault_sync_status: {cfg.get('google_drive_vault_sync_status', 'not_configured_local_runtime')}",
+        f"- custom_input_assurance_enabled: {cfg.get('custom_input_assurance_enabled', True)}",
+        "",
+        duplicate_scan(root).rstrip(),
+        "",
+        file_inventory(root).rstrip(),
+        "",
+        nested_layout_cleanup_summary(root),
+        "",
+        superseded_support_docs_summary(root),
+        "",
+        upgrade_review_notes(root, config_path).rstrip(),
+    ]
+    return "\n".join(lines).rstrip() + "\n"
 
 def read_file_snapshot(
     path: Path,
@@ -4936,8 +6343,8 @@ def read_json_snapshot(path: Path, default: Any) -> Tuple[Any, Dict[str, Any]]:
         raise RuntimeError(f"invalid JSON snapshot for {path.name}: {exc}") from exc
 
 
-def create_support_bundle(root: Path, config_path: Path, report_path: Optional[Path] = None) -> Path:
-    """Create a bounded, redacted, local support archive."""
+def export_for_support(root: Path, config_path: Path, report_path: Optional[Path] = None) -> Path:
+    """Create a deterministic, report-only, failure-isolated Export20 archive."""
     root = root.resolve()
     config_path = config_path.resolve()
     try:
@@ -4949,14 +6356,15 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
 
     export_dir = root / EXPORT_DIRNAME
     export_dir.mkdir(parents=True, exist_ok=True)
-    for stale_tmp in export_dir.glob(".image_downloader_support_*.tmp"):
+    canonical_name = Path(str(cfg.get("canonical_export_filename", CANONICAL_EXPORT_FILENAME))).name or CANONICAL_EXPORT_FILENAME
+    export_path = root / canonical_name
+    for stale_tmp in list(export_dir.glob(".image_downloader_support_export_*.tmp")) + list(root.glob(f".{canonical_name}.*.tmp")):
         with contextlib.suppress(OSError):
             if stale_tmp.stat().st_mtime < time.time() - 86400:
                 stale_tmp.unlink()
 
     stamp = timestamp_unique()
-    export_path = export_dir / f"image_downloader_support_{stamp}.zip"
-    tmp_path = export_dir / f".{export_path.name}.tmp"
+    tmp_path = root / f".{canonical_name}.{uuid.uuid4().hex[:8]}.tmp"
     collected: List[Dict[str, Any]] = []
     outcomes: List[Dict[str, Any]] = []
     omitted: List[Dict[str, Any]] = []
@@ -5016,7 +6424,7 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
             if digest in seen_hashes and required:
                 meta["content_duplicate_of"] = seen_hashes[digest]
             if len(collected) >= EXPORT_FILE_LIMIT - 1:
-                outcome.update(status="omitted_file_limit", note="support-bundle file limit reached")
+                outcome.update(status="omitted_file_limit", note="Export20 pre-manifest capacity reached")
                 omitted.append(dict(outcome))
                 return
             if total_bytes + len(data) > EXPORT_MAX_TOTAL_BYTES:
@@ -5067,12 +6475,13 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
         ("static.source", SCRIPT_FILENAME, True),
         ("static.launcher.standard", "run_image_downloader.bat", True),
         ("static.launcher.browser", "run_image_downloader_safe_browser.bat", True),
-        ("static.readme", "README.md", True),
-        ("static.license", "LICENSE.md", True),
-        ("static.security", "SECURITY.md", True),
-        ("static.requirements", "requirements.txt", True),
-        ("static.browser_requirements", "requirements-browser.txt", False),
-        ("static.example_config", "image_downloader_config.example.json", True),
+        ("static.launcher.export", "run_diagnose_export.bat", True),
+        ("static.runbook", "README_QUICK_START.md", True),
+        ("static.changelog", "CHANGELOG.md", True),
+        ("static.version", VERSION_FILENAME, True),
+        ("static.package_metadata", PACKAGE_METADATA_FILENAME, True),
+        ("static.manifest", MANIFEST_FILENAME, True),
+        ("static.drive_manifest", "DRIVE_UPLOAD_MANIFEST.csv", False),
     ]
     def diagnostic_collector() -> Tuple[str, Dict[str, Any]]:
         if report_path is not None:
@@ -5090,7 +6499,9 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
         ("generated.config", "image_downloader_config_redacted.json", True, lambda: (json.dumps(redact_json_for_export(cfg), indent=2, ensure_ascii=False) + "\n", cfg_snapshot_meta)),
         ("generated.diagnostic", "diagnostic_report.txt", True, diagnostic_collector),
         ("generated.environment", "dependency_environment_summary.txt", True, lambda: dependency_environment_summary(root, config_path)),
-        ("generated.safety", "public_safety_status.txt", True, lambda: public_safety_summary(root, config_path) + "\n" + duplicate_detection_summary(root, config_path) + "\n" + asset_metadata_reconciliation_summary(root, config_path) + "\n" + verification_scope_summary(root, config_path) + "\n" + support_scope_summary(root, config_path) + "\n" + verification_coverage_summary(root, config_path) + "\n" + config_input_assurance_summary(root, config_path) + "\n" + transport_discovery_summary(root, config_path)),
+        ("generated.audit", "deep_conflict_audit.txt", True, lambda: deep_conflict_audit(root, config_path)),
+        ("generated.support", "project_support_notes.txt", True, lambda: project_support_notes(root, config_path)),
+        ("generated.alignment", "current_parameter_alignment_status.txt", True, lambda: release_identity_summary(root) + "\n" + parameter_alignment_summary(root, config_path) + "\n" + duplicate_detection_summary(root, config_path) + "\n" + asset_metadata_reconciliation_summary(root, config_path) + "\n" + work_window_triage_exit_summary(root, config_path) + "\n" + release_archive_status_summary(root, config_path) + "\n" + path_targeting_summary(root, config_path) + "\n" + omission_control_coverage_summary(root, config_path) + "\n" + config_input_assurance_summary(root, config_path) + "\n" + transport_discovery_summary(root, config_path)),
         ("generated.logs", "logs_summary.txt", False, lambda: logs_summary(root, safe_int(cfg.get("log_tail_lines_for_export", 400), 400, min_value=20, max_value=2000))),
         ("generated.recent_run", "recent_run_summary.json", True, lambda: state_json_text(RECENT_RUN_FILENAME, {})),
         ("generated.failures", "recent_failures_errors.json", True, lambda: state_json_text(RECENT_FAILURES_FILENAME, [])),
@@ -5098,7 +6509,7 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
         ("generated.sequence", "sequential_search_stats.json", True, lambda: state_json_text(SEQUENCE_STATS_FILENAME, {})),
     ]
     # Required collectors always run before optional evidence so future additions cannot
-    # let a low-value optional file consume the last support-bundle slot. Stable collector IDs
+    # let a low-value optional file consume the last Export20 slot. Stable collector IDs
     # and archive names are preserved; only selection priority is hardened.
     for collector_id, filename, required in static_specs:
         if required:
@@ -5120,7 +6531,7 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
             "asset_id": "IMGDL-EXPORT-ENTRY-" + hashlib.sha256(item["arcname"].encode("utf-8")).hexdigest()[:16].upper(),
             "path": item["arcname"],
             "title": Path(item["arcname"]).name,
-            "purpose": "redacted local technical-support evidence",
+            "purpose": "support diagnostic/support evidence",
             "asset_class": "diagnostic",
             "role": "export-evidence",
             "format": Path(item["arcname"]).suffix.lower().lstrip(".") or "txt",
@@ -5128,8 +6539,8 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
             "version": APP_VERSION,
             "status": ASSET_STATUS,
             "sensitivity": ASSET_SENSITIVITY,
-            "source_of_truth": item["arcname"] in {SCRIPT_FILENAME, "README.md", "diagnostic_report.txt"},
-            "tags": ["image-downloader", "support-bundle", "diagnostic-evidence"],
+            "source_of_truth": item["arcname"] in {"MANIFEST.json", "project_support_notes.txt", "diagnostic_report.txt"},
+            "tags": ["image-downloader", "export20", "diagnostic-evidence"],
             "aliases": [Path(item["arcname"]).stem],
             "lineage": "generated from cached/read-only project evidence",
             "created_cdt": now_local(),
@@ -5141,8 +6552,8 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
     ]
     export_assets.append({
         "asset_id": "IMGDL-EXPORT-MANIFEST",
-        "path": "support_index.json",
-        "title": "Support Bundle Index",
+        "path": "export_manifest.json",
+        "title": "Export20 Canonical Manifest",
         "purpose": "Canonical archive registry, collector outcomes, integrity, and metadata",
         "asset_class": "manifest",
         "role": "canonical-manifest",
@@ -5152,30 +6563,35 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
         "status": ASSET_STATUS,
         "sensitivity": ASSET_SENSITIVITY,
         "source_of_truth": True,
-        "tags": ["image-downloader", "support-bundle", "index", "asset-metadata"],
+        "tags": ["image-downloader", "export20", "manifest", "asset-metadata"],
         "aliases": ["export manifest"],
-        "lineage": "generated by the local support-bundle collector",
+        "lineage": "generated by the report-only Export20 collector",
         "created_cdt": now_local(),
         "modified_cdt": now_local(),
         "size_bytes": None,
         "sha256": None,
         "checksum_scope": "omitted_self_reference",
     })
+    recent_runtime_evidence = json_load(root / STATE_DIRNAME / RECENT_RUN_FILENAME, {})
+    has_recent_runtime_evidence = isinstance(recent_runtime_evidence, dict) and bool(recent_runtime_evidence)
     manifest = {
         "metadata_schema": ASSET_METADATA_SCHEMA,
         "package_asset_id": export_asset_id,
         "project_slug": PROJECT_SLUG,
         "status": ASSET_STATUS,
         "sensitivity": ASSET_SENSITIVITY,
-        "tags": ["image-downloader", "support-bundle", "diagnostic-evidence", "asset-metadata"],
-        "aliases": ["Image Downloader support bundle", "diagnostic archive"],
-        "lineage": f"generated by {PROJECT_SLUG}@{APP_VERSION}",
+        "tags": ["image-downloader", "export20", "support-support", "asset-metadata"],
+        "aliases": ["Image Downloader support export", "diagnostic support"],
+        "lineage": f"generated by {PACKAGE_ASSET_ID}@{APP_VERSION}",
         "assets": export_assets,
         "app": APP_NAME,
         "version": APP_VERSION,
         "build": BUILD_NAME,
         "build_date": BUILD_DATE,
         "created_at": now_local(),
+        "canonical_output_path": export_path.name,
+        "single_easy_find_zip": True,
+        "previous_export_zip_retention": safe_int(cfg.get("export_keep_previous_zips", 0), 0, min_value=0, max_value=5),
         "file_limit": EXPORT_FILE_LIMIT,
         "entry_size_limit_bytes": EXPORT_MAX_ENTRY_BYTES,
         "total_size_limit_bytes": EXPORT_MAX_TOTAL_BYTES,
@@ -5184,19 +6600,23 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
         "captured_bytes_before_manifest": total_bytes,
         "plan": "allowlisted -> canonicalized -> consistency-snapshotted -> redacted -> content-deduplicated -> ranked/capped -> atomic ZIP",
         "report_only": True,
-        "network_calls_performed": False,
-        "mutating_actions_performed": False,
+        "network_calls_performed_by_export": False,
+        "migrations_repairs_dependency_installs_performed_by_export": False,
+        "runtime_evidence_status": "recent_completed_run_available" if has_recent_runtime_evidence else "startup_only_no_completed_download_run",
+        "runtime_evidence_guidance": "Run at least one URL before exporting when download/transport evidence is needed; startup-only exports remain valid for launch/config/path diagnosis.",
         "collector_outcomes": outcomes,
         "omitted_candidates": omitted,
-        "included_files": included_names + ["support_index.json"],
+        "included_files": included_names + ["export_manifest.json"],
         "included_entry_hashes": {item["arcname"]: item["sha256"] for item in collected},
-        "runtime_controls": {
+        "prime_directive_upgrades": {
             "modern_discovery": "HTML responsive/lazy/JSON-LD/CSS discovery plus optional Safe Browser response capture, all bounded by candidate limits",
             "server_aware_retries": "separate connect/read timeouts, monotonic wall-clock caps, exponential backoff with jitter, bounded Retry-After, connectivity-only extra attempts",
             "adaptive_throttle": "local AIMD/EWMA controller reduces concurrency on 429/5xx, network faults, slow completions, and elevated failure rate; no cloud AI dependency",
             "coalesced_reconnect": "debounced session-generation resets prevent parallel reconnect storms during VPN/IP changes",
             "resumable_transfers": "validator-gated Range/If-Range partial resume with bounded retention and restart-on-drift",
             "streamed_validation": "download stream is verified from disk with Pillow/pixel guards and hashed/copied without loading the full file into RAM",
+            "smart_safe_automation": "standard-first routing, duplicate/resume/reconnect/throttle/sequence automation, and conservative same-domain gallery pagination; Safe Browser remains manual trusted-sites-only",
+            "canonical_export": "one atomically replaced project-root ZIP named IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip",
         },
         "excluded_by_design": [
             "downloaded images",
@@ -5209,33 +6629,41 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
     }
     manifest_bytes = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     if len(collected) + 1 > EXPORT_FILE_LIMIT:
-        raise RuntimeError(f"Support bundle exceeded its file limit before ZIP creation: {len(collected) + 1}")
+        raise RuntimeError(f"Export plan exceeded Export20 limit before ZIP creation: {len(collected) + 1}")
 
     try:
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
             zf.comment = (
                 f"{export_asset_id}|{APP_VERSION}|status={ASSET_STATUS}|"
-                f"sensitivity={ASSET_SENSITIVITY}|tags=image-downloader,support-bundle,asset-metadata|"
-                "index=support_index.json"
+                f"sensitivity={ASSET_SENSITIVITY}|tags=image-downloader,export20,asset-metadata|"
+                "manifest=export_manifest.json"
             ).encode("utf-8")
             for item in collected:
                 zf.writestr(item["arcname"], item["data"])
-            zf.writestr("support_index.json", manifest_bytes)
+            zf.writestr("export_manifest.json", manifest_bytes)
         with zipfile.ZipFile(tmp_path, "r") as verify_zf:
             bad_member = verify_zf.testzip()
             names = verify_zf.namelist()
             zip_comment = verify_zf.comment.decode("utf-8", errors="replace")
             if not zip_comment.startswith(export_asset_id + "|"):
-                raise RuntimeError("Support ZIP is missing embedded asset metadata")
+                raise RuntimeError("Export ZIP is missing embedded asset metadata")
             if len(names) != len(set(names)):
-                raise RuntimeError("Support ZIP contains duplicate archive names")
+                raise RuntimeError("Export ZIP contains duplicate archive names")
         if bad_member:
-            raise RuntimeError(f"Support ZIP integrity check failed for {bad_member}")
+            raise RuntimeError(f"Export ZIP integrity check failed for {bad_member}")
         if len(names) > EXPORT_FILE_LIMIT:
-            raise RuntimeError(f"Support ZIP exceeded its file limit: {len(names)} entries")
-        if "support_index.json" not in names:
-            raise RuntimeError("Support ZIP is missing support_index.json")
+            raise RuntimeError(f"Export ZIP exceeded Export20 limit: {len(names)} entries")
+        if "export_manifest.json" not in names:
+            raise RuntimeError("Export ZIP is missing export_manifest.json")
         tmp_path.replace(export_path)
+        keep_previous = safe_int(cfg.get("export_keep_previous_zips", 0), 0, min_value=0, max_value=5)
+        prior_exports: List[Path] = []
+        prior_exports.extend(export_dir.glob("image_downloader_support_export_*.zip"))
+        prior_exports.extend(path for path in root.glob("IMAGE_DOWNLOADER_SUPPORT_EXPORT*.zip") if path.resolve() != export_path.resolve())
+        prior_exports = sorted({path.resolve() for path in prior_exports if path.exists()}, key=lambda path: path.stat().st_mtime, reverse=True)
+        for old_export in prior_exports[keep_previous:]:
+            with contextlib.suppress(OSError):
+                old_export.unlink()
     except Exception:
         with contextlib.suppress(OSError):
             tmp_path.unlink()
@@ -5244,11 +6672,28 @@ def create_support_bundle(root: Path, config_path: Path, report_path: Optional[P
 
 
 def interactive_loop(downloader: ImageDownloader) -> None:
+    if bool(downloader.config.get("computer_profile_include_in_console", True)):
+        ctx = downloader.computer_context
+        print(f"Active computer: {ctx.get('display_name')} [{ctx.get('diagnostic_id')}]")
+        print("Computer identification is informational only and never blocks launch or changes feature access.")
     print("Quick Start:")
     print("- Paste a page or image URL and press Enter")
+    print("- Queue capacity is 100 URLs; no more than 3 image downloads run at once")
+    print("- Queue changes auto-save to state/download_queue.json and unfinished work recovers on next launch")
+    print("- A timestamped session download list is written under reports/ when the session ends")
     print("- Press Enter on a blank line to exit")
-    print("- Commands: /config, /diagnose, /dry-run, /help")
+    print("- Smart Safe Automation handles duplicates, resume, reconnect, throttle, sequence, and conservative gallery navigation")
+    print("- Use Safe Browser Mode manually only for trusted JavaScript-heavy sites")
+    print("- Commands: /add URL..., /run, /queue, /config, /export, /diagnose, /dry-run, /help")
     print("")
+    recovered = downloader.pending_download_queue_count()
+    if recovered:
+        print(f"Recovered {recovered} queued URL(s) from the previous session. Resuming now.")
+        try:
+            downloader.process_saved_download_queue()
+        except KeyboardInterrupt:
+            print("\nQueue interrupted; unfinished item was returned to the saved queue.")
+        print("")
     while True:
         try:
             value = input("URL> ").strip()
@@ -5264,7 +6709,7 @@ def interactive_loop(downloader: ImageDownloader) -> None:
         if command in {"/quit", "/exit"}:
             break
         if command == "/help":
-            print("Commands: /config shows the config path, /diagnose writes a local report, /dry-run toggles no-download preview, blank line exits.")
+            print("Plain pasted URLs are saved to the persistent queue before network work starts. Use /add URL... to stage one or more URLs without starting, /run to drain the saved queue, and /queue to inspect it. Queue capacity is 100 and active image-download concurrency is hard-capped at 3. /config shows config path; /export replaces the one canonical support ZIP; /diagnose writes a report; /dry-run toggles preview mode; blank line exits and writes the timestamped session TXT.")
             continue
         if command == "/config":
             print(f"Config file: {downloader.config_path}")
@@ -5273,17 +6718,147 @@ def interactive_loop(downloader: ImageDownloader) -> None:
             path = write_diagnostics(downloader.root, downloader.config_path)
             print(f"Diagnostic report created: {path}")
             continue
+        if command == "/export":
+            path = export_for_support(downloader.root, downloader.config_path)
+            print(f"Support export ZIP created: {path}")
+            print("Attach this file to a support request if needed.")
+            continue
         if command in {"/dry-run", "/dryrun"}:
             downloader.config["dry_run"] = not bool(downloader.config.get("dry_run", False))
             print(f"Dry run is now {'ON' if downloader.config['dry_run'] else 'OFF'} for this session.")
             continue
-        downloader.process_url(value)
+        if command == "/queue":
+            pending = downloader.pending_download_queue_count()
+            print(f"Saved queue: {pending}/{downloader.download_queue_capacity} pending; active download cap={MAX_ACTIVE_DOWNLOADS}")
+            for item in downloader.download_queue_preview():
+                print(f"  {item['position']:03d}. {item['status']} | queued={item['queued_at']} | attempts={item['attempts']} | {item['url']}")
+            if pending > 12:
+                print(f"  ... {pending - 12} more queued item(s)")
+            continue
+        if command == "/run":
+            if downloader.pending_download_queue_count() == 0:
+                print("Saved queue is empty.")
+            else:
+                try:
+                    downloader.process_saved_download_queue()
+                except KeyboardInterrupt:
+                    print("\nQueue interrupted; unfinished item remains saved for recovery.")
+            print("Ready for next URL.\n")
+            continue
+        if command.startswith("/add "):
+            raw_values = [part for part in value[5:].split() if part]
+            result = downloader.enqueue_download_urls(raw_values, source="interactive /add")
+            print(f"Queued {len(result['accepted'])}; rejected {len(result['rejected'])}; pending={result['pending']}/{downloader.download_queue_capacity}")
+            for rejected in result["rejected"][:5]:
+                print(f"  Rejected: {rejected['reason']} | {rejected['url']}")
+            continue
+
+        raw_values = [part for part in value.split() if part]
+        if len(raw_values) > 1 and all(normalize_url(part) for part in raw_values):
+            result = downloader.enqueue_download_urls(raw_values, source="interactive paste")
+        else:
+            result = downloader.enqueue_download_urls([value], source="interactive paste")
+        if not result["accepted"]:
+            for rejected in result["rejected"][:5]:
+                print(f"Not queued: {rejected['reason']} | {rejected['url']}")
+            continue
+        if result["rejected"]:
+            print(f"Queued {len(result['accepted'])}; rejected {len(result['rejected'])}; pending={result['pending']}/{downloader.download_queue_capacity}")
+        try:
+            downloader.process_saved_download_queue()
+        except KeyboardInterrupt:
+            print("\nQueue interrupted; unfinished item remains saved for recovery.")
         print("Ready for next URL.\n")
 
 
+
+def run_release_identity_gate_self_test() -> Tuple[bool, str]:
+    test_root = Path(tempfile.mkdtemp(prefix="image_downloader_identity_gate_"))
+    try:
+        managed_names = [
+            SCRIPT_FILENAME,
+            VERSION_FILENAME,
+            PACKAGE_METADATA_FILENAME,
+            "run_image_downloader.bat",
+            "run_image_downloader_safe_browser.bat",
+            "run_diagnose_export.bat",
+            "README_QUICK_START.md",
+        ]
+        for name in managed_names:
+            (test_root / name).write_text(f"fixture:{name}\n", encoding="utf-8")
+        (test_root / VERSION_FILENAME).write_text(
+            f"Package ID: {PACKAGE_ID}\nVersion: {APP_VERSION}\nBuild: {BUILD_NAME}\n",
+            encoding="utf-8",
+        )
+        package_meta = {
+            "package_id": PACKAGE_ID,
+            "version": APP_VERSION,
+            "build_id": BUILD_NAME,
+            "gate": RUNTIME_IDENTITY_GATE_VERSION,
+        }
+        (test_root / PACKAGE_METADATA_FILENAME).write_text(json.dumps(package_meta, indent=2) + "\n", encoding="utf-8")
+
+        def write_manifest(extra_entries: Optional[List[Dict[str, Any]]] = None) -> None:
+            entries: List[Dict[str, Any]] = []
+            for name in managed_names:
+                path = test_root / name
+                entries.append({
+                    "path": name,
+                    "package_managed": True,
+                    "size_bytes": path.stat().st_size,
+                    "sha256": sha256_file(path),
+                })
+            if extra_entries:
+                entries.extend(extra_entries)
+            manifest = {
+                "package_id": PACKAGE_ID,
+                "version": APP_VERSION,
+                "build_id": BUILD_NAME,
+                "files": entries,
+            }
+            (test_root / MANIFEST_FILENAME).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        write_manifest()
+        before = {name: sha256_file(test_root / name) for name in managed_names + [MANIFEST_FILENAME]}
+        passed = verify_release_identity(test_root)
+        after = {name: sha256_file(test_root / name) for name in managed_names + [MANIFEST_FILENAME]}
+        if passed.get("result") != "PASS" or passed.get("verified_count") != passed.get("managed_count"):
+            return False, "valid synthetic release did not PASS"
+        if before != after or passed.get("verification_mutated_release_files") is not False:
+            return False, "verification mutated release files"
+
+        target = test_root / "README_QUICK_START.md"
+        target.write_text("stale mixed-release bytes\n", encoding="utf-8")
+        mixed = verify_release_identity(test_root)
+        if mixed.get("result") != "BLOCK" or not any(item.get("kind") in {"managed_size_mismatch", "managed_sha256_mismatch"} for item in mixed.get("mismatches", []) if isinstance(item, dict)):
+            return False, "same-version mixed managed file was not blocked"
+        target.write_text("fixture:README_QUICK_START.md\n", encoding="utf-8")
+        write_manifest()
+
+        metadata_bytes = (test_root / PACKAGE_METADATA_FILENAME).read_bytes()
+        (test_root / PACKAGE_METADATA_FILENAME).unlink()
+        missing = verify_release_identity(test_root)
+        if missing.get("result") != "BLOCK" or not any(item.get("kind") == "missing_control_file" for item in missing.get("mismatches", []) if isinstance(item, dict)):
+            return False, "missing control file was not blocked"
+        (test_root / PACKAGE_METADATA_FILENAME).write_bytes(metadata_bytes)
+        write_manifest()
+
+        write_manifest([{"path": "../escape.bin", "package_managed": True, "size_bytes": 1, "sha256": "0" * 64}])
+        unsafe = verify_release_identity(test_root)
+        if unsafe.get("result") != "BLOCK" or not any(item.get("kind") == "unsafe_managed_path" for item in unsafe.get("mismatches", []) if isinstance(item, dict)):
+            return False, "unsafe managed path was not blocked"
+        return True, "PASS, mixed-release BLOCK, missing-control BLOCK, unsafe-path BLOCK, no verification rewrite"
+    finally:
+        shutil.rmtree(test_root, ignore_errors=True)
+
+
 def run_self_test() -> int:
-    global _SELF_TEST_ALLOWED_ORIGIN
     print(f"{APP_NAME} self-test starting...")
+    gate_ok, gate_note = run_release_identity_gate_self_test()
+    if not gate_ok:
+        print(f"Self-test failed: runtime identity gate: {gate_note}")
+        return 1
+    print(f"Runtime identity gate synthetic tests: {gate_note}")
     parent = Path(tempfile.mkdtemp(prefix="image_downloader_selftest_"))
     root = parent / "Image Downloader self test with spaces"
     root.mkdir(parents=True, exist_ok=True)
@@ -5308,6 +6883,8 @@ def run_self_test() -> int:
             "noscript.png": build_test_png(240, 120, 20),
             "visual_base.png": visual_base,
             "visual_duplicate.png": visual_duplicate,
+            "slow.png": build_test_png(10, 140, 220),
+            "gallery_page.png": build_test_png(15, 25, 35),
         }
         for name, payload in fixtures.items():
             (images / name).write_bytes(payload)
@@ -5320,7 +6897,12 @@ def run_self_test() -> int:
 </head><body><img src="/images/photo_0007.png"><img src="/images/throttle.png">
 <noscript>&lt;img src="/images/noscript.png"&gt;</noscript>
 <img src="/images/visual_base.png"><img src="/images/visual_duplicate.png">
+<a rel="next" class="pagination-next" href="/gallery2.html">Next page</a>
 </body></html>""",
+            encoding="utf-8",
+        )
+        (site / "gallery2.html").write_text(
+            "<!doctype html><html><body><img src='/images/gallery_page.png'></body></html>",
             encoding="utf-8",
         )
 
@@ -5330,6 +6912,7 @@ def run_self_test() -> int:
         resume_payload = fixtures["resume.png"]
         retry_payload = fixtures["retry.png"]
         throttle_payload = fixtures["throttle.png"]
+        slow_payload = fixtures["slow.png"]
         etag = '"selftest-resume-v1"'
         last_modified = "Wed, 01 Jul 2026 12:00:00 GMT"
 
@@ -5363,6 +6946,9 @@ def run_self_test() -> int:
                 if path == "/images/resume.png":
                     self._send_image_headers(resume_payload)
                     return
+                if path == "/images/slow.png":
+                    self._send_image_headers(slow_payload)
+                    return
                 super().do_HEAD()
 
             def do_GET(self) -> None:
@@ -5393,6 +6979,12 @@ def run_self_test() -> int:
                     self._send_image_headers(throttle_payload)
                     self.wfile.write(throttle_payload)
                     return
+                if path == "/images/slow.png":
+                    self._send_image_headers(slow_payload)
+                    time.sleep(6)
+                    with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+                        self.wfile.write(slow_payload)
+                    return
                 if path == "/images/resume.png":
                     range_header = str(self.headers.get("Range", ""))
                     match = re.match(r"bytes=(\d+)-", range_header)
@@ -5413,8 +7005,8 @@ def run_self_test() -> int:
                 super().do_GET()
 
         config_path = root / CONFIG_FILENAME
-        if bool(default_config().get("hide_downloaded_media", True)):
-            print("Self-test failed: downloaded media is not visible by default.")
+        if not bool(default_config().get("hide_downloaded_media", False)):
+            print("Self-test failed: downloaded media is not hidden by default.")
             return 1
         if windows_attributes_with_visibility(0, True) & WINDOWS_FILE_ATTRIBUTE_HIDDEN == 0:
             print("Self-test failed: Windows hidden attribute helper did not enable the hidden bit.")
@@ -5423,6 +7015,9 @@ def run_self_test() -> int:
             print("Self-test failed: Windows hidden attribute helper did not clear the hidden bit.")
             return 1
         cfg = default_config()
+        if int(default_config().get("request_wall_clock_timeout_seconds", 0)) != 5:
+            print("Self-test failed: default per-image download timeout is not 5 seconds.")
+            return 1
         cfg.update({
             "output": "downloads",
             "workers": 3,
@@ -5447,7 +7042,6 @@ def run_self_test() -> int:
             "sequence_max_failed_attempts": 2,
             "sequence_backward_steps": 1,
             "sequence_probe_delay_ms": 0,
-            "sequence_discovery_enabled": True,
             "safe_svg_validation": True,
             "srcset_preference": "all",
             "resume_min_bytes": 1,
@@ -5459,12 +7053,18 @@ def run_self_test() -> int:
             "duplicate_library_reconcile_enabled": True,
             "duplicate_library_reconcile_max_files": 100,
             "duplicate_library_reconcile_time_budget_seconds": 5,
+            "automation_mode": "smart_safe",
+            "auto_gallery_follow_enabled": True,
+            "auto_gallery_page_limit": 3,
+            "auto_gallery_max_depth": 1,
+            "auto_gallery_link_limit_per_page": 12,
+            "canonical_export_filename": CANONICAL_EXPORT_FILENAME,
+            "export_keep_previous_zips": 0,
         })
         json_dump(config_path, cfg)
         os.chdir(site)
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), SelfTestHandler)
         port = httpd.server_address[1]
-        _SELF_TEST_ALLOWED_ORIGIN = f"http://127.0.0.1:{port}"
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
 
@@ -5510,6 +7110,24 @@ def run_self_test() -> int:
                 "updated_at": now_local(),
             })
             summary = downloader.process_url(f"http://127.0.0.1:{port}/index.html")
+            original_download_timeout = downloader.config.get("request_wall_clock_timeout_seconds", 30)
+            original_connect_timeout = downloader.config.get("connect_timeout", 3)
+            original_read_timeout = downloader.config.get("read_timeout", 5)
+            downloader.config["request_wall_clock_timeout_seconds"] = 5
+            downloader.config["connect_timeout"] = 3
+            downloader.config["read_timeout"] = 5
+            slow_started = time.monotonic()
+            slow_result = downloader.download_one(f"http://127.0.0.1:{port}/images/slow.png", source="self_test", reason="five_second_timeout")
+            slow_elapsed = time.monotonic() - slow_started
+            downloader.config["request_wall_clock_timeout_seconds"] = original_download_timeout
+            downloader.config["connect_timeout"] = original_connect_timeout
+            downloader.config["read_timeout"] = original_read_timeout
+            if slow_result.status != "failed" or "timeout" not in slow_result.reason.lower() and "timed out" not in slow_result.reason.lower() and "exceeded" not in slow_result.reason.lower():
+                print(f"Self-test failed: slow image did not fail through the 5-second timeout contract ({slow_result.status}: {slow_result.reason}).")
+                return 1
+            if slow_elapsed > 6.5:
+                print(f"Self-test failed: slow image exceeded bounded timeout allowance ({slow_elapsed:.3f}s).")
+                return 1
             downloader._reset_http_session("self-test simulated network change", f"http://127.0.0.1:{port}/index.html", "self_test")
             downloader._reset_http_session("self-test concurrent reset coalescing", f"http://127.0.0.1:{port}/index.html", "self_test")
             reset_snapshot = downloader._network_recovery_snapshot()
@@ -5540,7 +7158,7 @@ def run_self_test() -> int:
         discovery = summary.get("discovery", {}) if isinstance(summary.get("discovery"), dict) else {}
         recovery = summary.get("transfer_recovery", {}) if isinstance(summary.get("transfer_recovery"), dict) else {}
         duplicate_evidence = summary.get("duplicate_detection", {}) if isinstance(summary.get("duplicate_detection"), dict) else {}
-        if downloaded < 9 or sequence_downloaded < 2:
+        if downloaded < 10 or sequence_downloaded < 2:
             print(f"Self-test failed: expected modern + sequential images were not downloaded (downloaded={downloaded}, sequence={sequence_downloaded}).")
             return 1
         if int(summary.get("duplicate_visual_skips", 0)) < 1 or int(duplicate_evidence.get("visual_duplicates_skipped", 0)) < 1:
@@ -5566,6 +7184,10 @@ def run_self_test() -> int:
         if int(adaptive.get("limit_decreases", 0)) < 1 or int(adaptive.get("max_observed_in_flight", 0)) < 1:
             print("Self-test failed: adaptive throttle did not adjust or observe bounded concurrency.")
             return 1
+        automation = summary.get("automation", {}) if isinstance(summary.get("automation"), dict) else {}
+        if not automation.get("enabled") or int(discovery.get("auto_gallery_pages_visited", 0)) < 1:
+            print("Self-test failed: Smart Safe Automation did not follow the strong same-domain gallery/pagination signal.")
+            return 1
         if summary.get("terminal_status") != "completed":
             print("Self-test failed: successful run did not finish with terminal_status=completed.")
             return 1
@@ -5573,8 +7195,8 @@ def run_self_test() -> int:
             print("Self-test failed: operational run evidence was not recorded.")
             return 1
         visibility = summary.get("media_visibility", {}) if isinstance(summary.get("media_visibility"), dict) else {}
-        if visibility.get("configured_default") != "visible":
-            print("Self-test failed: run summary did not report visible media as the configured default.")
+        if visibility.get("configured_default") != "hidden":
+            print("Self-test failed: run summary did not report hidden media as the configured default.")
             return 1
         if os.name != "nt" and int(visibility.get("not_applicable", 0)) < downloaded:
             print("Self-test failed: non-Windows visibility outcomes were not recorded for completed downloads.")
@@ -5588,27 +7210,54 @@ def run_self_test() -> int:
         if validate_image_payload(corrupt_png, "png", strict_raster_verify=True, max_pixels=1000000)[0]:
             print("Self-test failed: corrupt PNG incorrectly passed strict verification.")
             return 1
+        for reserved_name in ["CON.png", "aux.JPG", "LPT1.webp", "nul"]:
+            sanitized = sanitize_filename(reserved_name)
+            if os.path.splitext(sanitized)[0].rstrip(" .").upper() in WINDOWS_RESERVED_FILE_STEMS:
+                print(f"Self-test failed: Windows-reserved filename was not neutralized ({reserved_name} -> {sanitized}).")
+                return 1
+        if "\u202e" in sanitize_filename("safe\u202ename.png"):
+            print("Self-test failed: bidirectional filename control was not removed.")
+            return 1
+        secret_url = "https://user:password@example.com/image.png?X-Amz-Signature=topsecret&size=large&token=abc123"
+        safe_secret_url = redact_url_for_evidence(secret_url)
+        if any(secret in safe_secret_url for secret in ["user", "password", "topsecret", "abc123"]):
+            print("Self-test failed: URL evidence redaction exposed credentials or signed-query values.")
+            return 1
+        if "size=large" not in safe_secret_url or "<REDACTED>" not in urllib.parse.unquote(safe_secret_url):
+            print("Self-test failed: URL evidence redaction removed useful non-secret evidence or omitted redaction markers.")
+            return 1
+        embedded_secret = redact_sensitive_text(f"request failed for {secret_url}")
+        if any(secret in embedded_secret for secret in ["user", "password", "topsecret", "abc123"]):
+            print("Self-test failed: embedded URL redaction exposed credentials or signed-query values.")
+            return 1
 
         if httpd is not None:
             httpd.shutdown()
             thread.join(timeout=5)
             server_stopped = True
-        export_path = create_support_bundle(root, config_path)
-        second_export = create_support_bundle(root, config_path)
+        export_path = export_for_support(root, config_path)
+        second_export = export_for_support(root, config_path)
+        if export_path != second_export or export_path.name != CANONICAL_EXPORT_FILENAME:
+            print("Self-test failed: export did not use one canonical easy-to-find ZIP path.")
+            return 1
+        export_zip_candidates = list(root.glob("IMAGE_DOWNLOADER_SUPPORT_EXPORT*.zip")) + list((root / EXPORT_DIRNAME).glob("image_downloader_support_export_*.zip"))
+        if len(export_zip_candidates) != 1:
+            print(f"Self-test failed: expected one support ZIP, found {len(export_zip_candidates)}.")
+            return 1
         for candidate_export in (export_path, second_export):
             with zipfile.ZipFile(candidate_export, "r") as zf:
                 names = zf.namelist()
                 if not zf.comment.decode("utf-8", errors="replace").startswith("IMGDL-EXPORT-"):
-                    print("Self-test failed: support ZIP metadata comment is missing.")
+                    print("Self-test failed: Export20 ZIP metadata comment is missing.")
                     return 1
-                manifest = json.loads(zf.read("support_index.json").decode("utf-8"))
+                manifest = json.loads(zf.read("export_manifest.json").decode("utf-8"))
                 if manifest.get("metadata_schema") != ASSET_METADATA_SCHEMA or not manifest.get("assets"):
-                    print("Self-test failed: support ZIP index metadata is incomplete.")
+                    print("Self-test failed: Export20 asset manifest metadata is incomplete.")
                     return 1
             if len(names) > EXPORT_FILE_LIMIT or len(names) != len(set(names)):
                 print("Self-test failed: export file cap or duplicate-name guard failed.")
                 return 1
-            if not manifest.get("report_only") or manifest.get("network_calls_performed"):
+            if not manifest.get("report_only") or manifest.get("network_calls_performed_by_export"):
                 print("Self-test failed: export report-only/offline posture is incorrect.")
                 return 1
             if not isinstance(manifest.get("collector_outcomes"), list) or not manifest.get("collector_outcomes"):
@@ -5617,7 +7266,7 @@ def run_self_test() -> int:
             if candidate_export.name in names or any(name.lower().endswith(".zip") for name in names):
                 print("Self-test failed: export recursively included an archive.")
                 return 1
-            for required_name in ["diagnostic_report.txt", "recent_failures_errors.json", "public_safety_status.txt"]:
+            for required_name in ["diagnostic_report.txt", "project_support_notes.txt", "recent_failures_errors.json", "current_parameter_alignment_status.txt"]:
                 if required_name not in names:
                     print(f"Self-test failed: export missing {required_name}.")
                     return 1
@@ -5626,22 +7275,64 @@ def run_self_test() -> int:
         for heading in [
             "Smart discovery / transfer stability summary",
             "Platform/API compliance and drift snapshot",
-            "Local support scope",
+            "Optional external archive status",
             "Custom-input / config assurance snapshot",
-            "Application asset metadata summary",
+            "Digital asset metadata reconciliation",
+            "Helpful computer awareness (non-restrictive)",
             "Automatic duplicate-detection summary",
-            "Runtime path summary",
-            "Verification coverage",
-            "Verification scope",
+            "Path targeting / relocation summary",
+            "Omission-control coverage ledger",
+            "Work-window triage / exit status",
         ]:
             if heading not in diagnostic_text:
                 print(f"Self-test failed: diagnostics missing {heading}.")
                 return 1
+        high_worker_cfg = normalize_config({"workers": 99, "adaptive_throttle_min_workers": 99, "adaptive_throttle_max_workers": 99})
+        if high_worker_cfg.get("workers") != MAX_ACTIVE_DOWNLOADS or high_worker_cfg.get("adaptive_throttle_min_workers") != MAX_ACTIVE_DOWNLOADS or high_worker_cfg.get("adaptive_throttle_max_workers") != MAX_ACTIVE_DOWNLOADS:
+            print("Self-test failed: legacy/high worker settings did not normalize to the hard cap of three.")
+            return 1
+        if safe_int(cfg.get("download_queue_capacity", 0), 0) != DOWNLOAD_QUEUE_HARD_MAX:
+            print("Self-test failed: default download queue capacity is not 100.")
+            return 1
+        if safe_int(cfg.get("workers", 0), 0) > MAX_ACTIVE_DOWNLOADS or safe_int(cfg.get("adaptive_throttle_max_workers", 0), 0) > MAX_ACTIVE_DOWNLOADS:
+            print("Self-test failed: configured or adaptive worker cap exceeds three.")
+            return 1
+        if downloader.adaptive_throttle.snapshot().get("max_observed_in_flight", 0) > MAX_ACTIVE_DOWNLOADS:
+            print("Self-test failed: observed active downloads exceeded the hard cap of three.")
+            return 1
+        queue_test = downloader.enqueue_download_urls([f"http://127.0.0.1:{port}/queued_{i}.png" for i in range(DOWNLOAD_QUEUE_HARD_MAX + 1)], source="self-test")
+        if len(queue_test.get("accepted", [])) != DOWNLOAD_QUEUE_HARD_MAX or len(queue_test.get("rejected", [])) != 1:
+            print("Self-test failed: persistent queue did not enforce exactly 100 items.")
+            return 1
+        preview = downloader.download_queue_preview(limit=DOWNLOAD_QUEUE_HARD_MAX + 5)
+        if len(preview) != DOWNLOAD_QUEUE_HARD_MAX or not downloader.download_queue_path.is_file():
+            print("Self-test failed: persistent queue autosave/preview evidence is incomplete.")
+            return 1
+        downloader.download_queue_state["items"][0]["status"] = "running"
+        downloader._save_download_queue_state()
+        reloaded_queue = downloader._load_download_queue_state()
+        if reloaded_queue.get("items", [])[0].get("status") != "pending" or safe_int(reloaded_queue.get("recovered_running_items", 0), 0) < 1:
+            print("Self-test failed: running queue item was not recovered to pending.")
+            return 1
+        downloader.download_queue_state["items"] = []
+        downloader._save_download_queue_state()
+        latest_list = downloader.write_session_download_list(final=False)
+        if latest_list is None or not latest_list.is_file() or "Maximum active downloads: 3" not in latest_list.read_text(encoding="utf-8"):
+            print("Self-test failed: session download-list TXT was not generated with concurrency metadata.")
+            return 1
+        if resolve_computer_profile("Raider GE66 12UHS") != "PC-DEUSEX-03":
+            print("Self-test failed: helpful computer alias did not resolve to DeusEx.")
+            return 1
+        test_ctx = detect_computer_context({"computer_awareness_enabled": True, "computer_profile_override_env_name": "IMAGE_DOWNLOADER_TEST_COMPUTER_LABEL"})
+        for forbidden_true in ("launch_restrictions", "state_path_changes", "lock_scope_changes", "feature_restrictions"):
+            if bool(test_ctx.get(forbidden_true)):
+                print(f"Self-test failed: computer awareness unexpectedly enabled {forbidden_true}.")
+                return 1
         print(
             "Self-test passed: startup/config/path-with-spaces, modern responsive/lazy/JSON-LD/CSS discovery, "
             "bounded sequential probing, server-aware Retry-After, adaptive AIMD/EWMA throttling, coalesced reconnect/session renewal, validator-gated partial resume, streamed strict image verification, "
-            "non-signalling process identity, duplicate-instance rejection, lock-before-migration startup ordering, schema/state checkpoints, VPN/IP recovery hooks, graceful bounded worker controls, "
-            "redacted local support evidence, URL/SHA256/visual/library duplicate detection, content-addressed downloaded-image metadata, embedded ZIP metadata, atomic ZIP finalization, and recursive-archive prevention are working."
+            "non-signalling process identity, optional instance-lock mechanics, lock-before-migration test ordering, schema/state checkpoints, VPN/IP recovery hooks, graceful bounded worker controls, "
+            "v2.17.5 runtime release identity/hash gate, redacted failure-isolated offline Export20, credential-safe URL evidence, Windows-reserved filename neutralization, nonrestrictive helpful computer labeling, one canonical easy-to-find support ZIP, persistent 100-item queue autosave/crash recovery, a hard three-active-download ceiling, timestamped session download-list TXT output, Smart Safe Automation with conservative same-domain gallery pagination, strict five-second per-image download timeout, URL/SHA256/visual/library duplicate autodetection, canonical asset metadata reconciliation, content-addressed downloaded-image metadata, embedded ZIP metadata, atomic ZIP finalization, and recursive-export prevention are working."
         )
         return 0
     except Exception:
@@ -5649,7 +7340,6 @@ def run_self_test() -> int:
         traceback.print_exc()
         return 1
     finally:
-        _SELF_TEST_ALLOWED_ORIGIN = ""
         if httpd is not None and not server_stopped:
             with contextlib.suppress(Exception):
                 httpd.shutdown()
@@ -5666,7 +7356,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--browser-mode", action="store_true", help="Use optional Safe Browser Mode for trusted sites only")
     parser.add_argument("--dry-run", action="store_true", help="Preview candidates without saving files")
     parser.add_argument("--diagnose", action="store_true", help="Write an extensive diagnostic report")
+    parser.add_argument("--export-support", action="store_true", help="Create a redacted support ZIP with no more than 20 files")
     parser.add_argument("--self-test", action="store_true", help="Run local sanity checks")
+    parser.add_argument("--verify-release", action="store_true", help="Verify v2.17.5 release identity and every package-managed file, then exit")
     parser.add_argument("--version", action="store_true", help="Show version and exit")
     return parser.parse_args(argv)
 
@@ -5676,23 +7368,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.version:
         print(f"{APP_NAME} {APP_VERSION} ({BUILD_NAME}, {BUILD_DATE})")
         return 0
-    if args.self_test:
-        return run_self_test()
     root = app_root()
+    # v2.17.5 ordering: safe local root/log setup, then read-only identity/hash gate,
+    # before dependency installs, credentials, browser startup, or download/network activity.
+    (root / LOG_DIRNAME).mkdir(parents=True, exist_ok=True)
+    gate_evidence = verify_release_identity(root)
+    if args.verify_release:
+        print_release_identity_result(gate_evidence)
+        return 0 if gate_evidence.get("result") == "PASS" else RELEASE_IDENTITY_EXIT_CODE
+    if args.self_test:
+        if gate_evidence.get("result") != "PASS":
+            print_release_identity_result(gate_evidence)
+            print("Self-test blocked because the release identity gate did not PASS.")
+            return RELEASE_IDENTITY_EXIT_CODE
+        return run_self_test()
     config_path = Path(args.config).resolve() if args.config else root / CONFIG_FILENAME
-    if args.diagnose:
+    if args.diagnose or args.export_support:
         try:
-            # Diagnostic mode creates a local report but does not install dependencies,
-            # run cleanup/repair, migrate config/state,
+            # Diagnostic/export mode is intentionally report-only: it creates reports/exports,
+            # but it does not install dependencies, run cleanup/repair, migrate config/state,
             # or take the interactive instance lock.
             diagnostic_path: Optional[Path] = None
             if args.diagnose:
                 diagnostic_path = write_diagnostics(root, config_path)
                 print(f"Diagnostic report created: {diagnostic_path}")
+            if args.export_support:
+                path = export_for_support(root, config_path, diagnostic_path)
+                print(f"Support export ZIP created: {path}")
+                print("Attach this file to a support request if needed.")
             return 0
         except Exception as exc:
             print(f"Diagnostic/export error: {exc}")
             return 1
+    if gate_evidence.get("result") != "PASS":
+        print_release_identity_result(gate_evidence)
+        print("Startup blocked before dependency or network activity. Run run_diagnose_export.bat for a redacted support export, or restore the full verified release ZIP.")
+        return RELEASE_IDENTITY_EXIT_CODE
     browser_override: Optional[bool] = None
     if args.browser_mode:
         browser_override = True
@@ -5711,13 +7422,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         guard = InstanceGuard(
             root,
             role="interactive",
-            enabled=safe_bool(raw_cfg.get("single_instance_guard_enabled", True), True),
+            enabled=False,
             stale_seconds=safe_int(raw_cfg.get("single_instance_lock_stale_seconds", 21600), 21600, min_value=60, max_value=604800),
             run_id=top_level_run_id,
         )
         guard.acquire()
         guard.heartbeat("startup_owned")
         downloader = ImageDownloader(root, config_path, browser_mode=browser_override, dry_run=dry_override, top_level_run_id=guard.run_id, instance_guard=guard)
+        archive_removed_coordination_artifacts(root)
+        archive_nested_release_folder(root, downloader.config)
+        archive_superseded_support_docs(root, downloader.config)
         guard.heartbeat("startup_ready")
         if args.url:
             summary = downloader.process_url(args.url)

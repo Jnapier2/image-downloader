@@ -1,0 +1,55 @@
+{
+  "metadata_schema": "package-metadata-v1",
+  "package_id": "gateway-image-downloader",
+  "package_asset_id": "IMGDL-PACKAGE",
+  "application": "Gateway Image Downloader",
+  "project_slug": "image-downloader",
+  "version": "2026.08.08.1",
+  "build_id": "v2175-queue-autosave-recovery-3worker-session-list",
+  "build_date": "2026-08-08",
+  "status": "current-public-source",
+  "publisher": "Gateway Information Group LLC",
+  "runtime_identity_gate": {
+    "required": true,
+    "gate_version": "runtime-release-identity-v1",
+    "block_exit_code": 23,
+    "required_controls": [
+      "VERSION.txt",
+      "MANIFEST.json",
+      "PACKAGE_METADATA.json"
+    ],
+    "managed_inventory_source": "MANIFEST.json files where package_managed=true",
+    "managed_file_count_expected": 13,
+    "checks": [
+      "package_id",
+      "version",
+      "build_id",
+      "root-contained unique paths",
+      "presence",
+      "size",
+      "sha256"
+    ],
+    "ordering": "before dependency, browser, or network activity",
+    "verification_rewrites_release_files": false
+  },
+  "queue_and_session": {
+    "queue_state_path": "state/download_queue.json",
+    "queue_capacity_hard_max": 100,
+    "active_download_hard_max": 3,
+    "session_download_list_latest": "reports/LATEST_DOWNLOAD_LIST.txt",
+    "operational_state_is_local_private": true
+  },
+  "launchers": {
+    "primary": "run_image_downloader.bat",
+    "safe_browser": "run_image_downloader_safe_browser.bat",
+    "diagnostics_export": "run_diagnose_export.bat"
+  },
+  "runtime": {
+    "python_min": "3.11",
+    "compiled_binaries": false,
+    "elevation_required": false,
+    "security_exclusions_added": false
+  },
+  "copyright_notice": "Copyright © 2026 Gateway Information Group LLC. All rights reserved.",
+  "rights": "Third-party packages and services retain their own licenses and terms."
+}
