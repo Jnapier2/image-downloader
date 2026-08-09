@@ -1,10 +1,10 @@
 @echo off
-rem Asset ID: IMGDL-LAUNCHER-STANDARD
+rem Asset ID: IMGDL-LAUNCHER-EXPORT
 rem Version: 2026.08.08.1
 rem Build: v2175-queue-autosave-recovery-3worker-session-list
 rem Status: current
 rem Sensitivity: public-source
-rem Tags: image-downloader,launcher,standard-mode,windows,portable,asset-metadata
+rem Tags: image-downloader,launcher,diagnostics,export20,windows,portable,asset-metadata
 rem Copyright © 2026 Gateway Information Group LLC. All rights reserved.
 setlocal EnableExtensions
 
@@ -17,9 +17,9 @@ set "ENV_BOT_DIR=%IMAGE_DOWNLOADER_BOT_DIR%"
 set "EXIT_CODE=0"
 
 if defined ENV_BOT_DIR call :consider_override
-title Gateway Image Downloader
+title Gateway Image Downloader Diagnostics and Export
 echo =========================================
-echo Gateway Image Downloader
+echo Gateway Image Downloader Diagnostics and Export
 echo =========================================
 echo Using bot folder: %BOT_DIR%
 echo Version: 2026.08.08.1
@@ -27,7 +27,7 @@ echo Build: v2175-queue-autosave-recovery-3worker-session-list
 echo.
 echo Started: %DATE% %TIME%
 echo Target source: %BOT_DIR_SOURCE%
-echo Launch mode: portable project-folder first; no automatic copy or stale installed-folder sync.
+echo Report-only export: no dependency install, config migration, cleanup sync, or download activity.
 echo.
 
 if not exist "%BOT_DIR%\%SCRIPT_NAME%" (
@@ -37,7 +37,6 @@ if not exist "%BOT_DIR%\%SCRIPT_NAME%" (
     set "EXIT_CODE=1"
     goto :end
 )
-
 call :verify_write_dir "%BOT_DIR%"
 if errorlevel 1 (
     echo The bot folder is not writable: %BOT_DIR%
@@ -46,7 +45,6 @@ if errorlevel 1 (
     set "EXIT_CODE=1"
     goto :end
 )
-
 cd /d "%BOT_DIR%"
 if errorlevel 1 (
     echo Could not enter bot folder: %BOT_DIR%
@@ -54,35 +52,26 @@ if errorlevel 1 (
     set "EXIT_CODE=1"
     goto :end
 )
-
 call :find_python
 if errorlevel 1 (
     set "EXIT_CODE=1"
     goto :end
 )
-call :verify_release_integrity
+echo Checking release identity for diagnostic evidence...
+%PY_CMD% "%BOT_DIR%\%SCRIPT_NAME%" --verify-release
 if errorlevel 1 (
-    set "EXIT_CODE=23"
-    goto :end
+    echo Release identity gate is BLOCKED. Diagnostic/Export20 is intentionally still allowed.
+    echo.
 )
-
-call :ensure_core_dependencies
-if errorlevel 1 (
-    set "EXIT_CODE=1"
-    goto :end
-)
-
-echo Quick Start:
-echo - Paste a page or image URL and press Enter
-echo - Press Enter on a blank line to exit
-echo - Type /export to create a redacted support ZIP
-echo - Type /config to see the config file path
-echo - Optional: set IMAGE_DOWNLOADER_BOT_DIR to another complete project folder
-echo - Smart Safe Automation handles duplicates, resume, reconnect, adaptive throttle, sequences, and conservative gallery pages
-echo - Computer auto-labeling is diagnostic-only and never blocks launch or changes paths/features
+echo Creating one redacted support ZIP...
 echo.
-%PY_CMD% "%BOT_DIR%\%SCRIPT_NAME%" --standard %*
+%PY_CMD% "%BOT_DIR%\%SCRIPT_NAME%" --export-support %*
 set "EXIT_CODE=%ERRORLEVEL%"
+if "%EXIT_CODE%"=="0" (
+    echo.
+    echo Support bundle created:
+    echo %BOT_DIR%\IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip
+)
 goto :end
 
 :consider_override
@@ -128,46 +117,12 @@ echo Install current 64-bit Python from python.org and enable Add Python to PATH
 echo.
 exit /b 1
 
-:verify_release_integrity
-echo Verifying v2.17.5 release identity and managed-file hashes...
-%PY_CMD% "%BOT_DIR%\%SCRIPT_NAME%" --verify-release
-if errorlevel 1 (
-    echo.
-    echo ERROR: Release identity/integrity verification BLOCKED startup.
-    echo No dependency install, browser start, or download activity will continue.
-    echo Run run_diagnose_export.bat for Support Export20 evidence, or restore the complete verified release ZIP.
-    echo.
-    exit /b 23
-)
-echo Release identity gate: PASS
-echo.
-goto :eof
-
-:ensure_core_dependencies
-%PY_CMD% -c "import requests, bs4, PIL" >nul 2>nul
-if not errorlevel 1 goto :eof
-echo Installing bounded core packages: requests beautifulsoup4 pillow
-echo This uses normal Python packaging and does not disable Norton, SmartScreen, or Windows protections.
-%PY_CMD% -m pip install --disable-pip-version-check "requests>=2.32,<3" "beautifulsoup4>=4.12,<5" "pillow>=10,<13"
-if errorlevel 1 (
-    echo Retrying as a user-level Python install...
-    %PY_CMD% -m pip install --user --disable-pip-version-check "requests>=2.32,<3" "beautifulsoup4>=4.12,<5" "pillow>=10,<13"
-)
-%PY_CMD% -c "import requests, bs4, PIL" >nul 2>nul
-if errorlevel 1 (
-    echo.
-    echo Failed to verify one or more core packages.
-    echo.
-    exit /b 1
-)
-goto :eof
-
 :end
 echo.
 if "%EXIT_CODE%"=="0" (
-    echo Gateway Image Downloader finished successfully.
+    echo Gateway Image Downloader export finished successfully.
 ) else (
-    echo Gateway Image Downloader finished with exit code %EXIT_CODE%.
+    echo Gateway Image Downloader export finished with exit code %EXIT_CODE%.
 )
 echo Finished: %DATE% %TIME%
 echo.

@@ -4,7 +4,7 @@
 
 Image Downloader turns permissioned collection from public pages or direct image URLs into a controlled, repeatable workflow. Bounded discovery, streamed validation, duplicate controls, and resumable state help limit rework and unusable output while preserving clear site-policy and network-safety boundaries.
 
-**Current release: 2026.08.02.1.** This release strengthens Windows filename handling and keeps credential-bearing URL details out of persisted operational evidence while retaining SHA-256 correlation for troubleshooting. See [CHANGELOG.md](CHANGELOG.md) for the concise release history.
+**Current release: 2026.08.08.1.** The current build adds a persistent 100-item work queue, automatic recovery after interruption, timestamped session ledgers, and a hard ceiling of three active downloads. It retains the credential-safe evidence, Windows filename protection, and streamed validation introduced in earlier releases.
 
 ## Collection safeguards
 
@@ -16,8 +16,10 @@ Image Downloader turns permissioned collection from public pages or direct image
 - Persisted URL evidence redacts embedded credentials and common signed-query fields while retaining non-sensitive routing context and an exact-input SHA-256 correlation digest.
 - Duplicate controls at URL, SHA-256 content, filename-conflict, and perceptual-fingerprint layers.
 - Validator-gated partial resume, atomic finalization, adaptive concurrency, bounded retries, and single-instance ownership.
+- A project-local queue is saved automatically and can recover unfinished work after an interruption; the queue is bounded at 100 items and active transfers never exceed three.
+- Each session produces a readable latest-download list plus a timestamped ledger for follow-up and reconciliation.
 - A strict five-second per-image network budget covers HEAD preflight, GET attempts, bounded backoff, reconnects, and streamed transfer; page discovery keeps its separate limit.
-- Visible download output by default; the Windows hidden-file attribute is an explicit configuration opt-in.
+- Completed media uses the Windows hidden-file attribute by default as a privacy-conscious filing option; the setting can be disabled without changing file contents.
 
 Downloaded bytes remain provisional until destination, type, size, decode, duplicate, and integrity checks pass. Resume improves continuity, while atomic finalization prevents a partial or suspect transfer from being presented as complete.
 
@@ -41,7 +43,7 @@ Paste a permitted page or image URL at the prompt. For a one-shot, non-interacti
 python image_downloader.py --standard --dry-run --url "https://example.org/gallery"
 ```
 
-`run_image_downloader.bat` provides the same standard-mode entry point without installing anything silently.
+`run_image_downloader.bat` provides the same standard-mode entry point. `run_diagnose_export.bat` creates a redacted, offline support bundle without starting a download.
 
 ## Optional browser mode
 
@@ -64,11 +66,13 @@ The versioned configuration centralizes network timeouts, worker and retry bound
 ## Verification
 
 ```powershell
+python image_downloader.py --verify-release
+python image_downloader.py --self-test
 python -m compileall -q image_downloader.py tests
 python -m unittest discover -s tests -v
 ```
 
-The offline safety suite exercises visible-output defaults, URL and destination controls, dangerous-content classification, SVG active-content detection, safe filenames, HTTP range parsing, duplicate safeguards, and browser-route guardrails without making network requests.
+The release gate checks the running version, build identity, and SHA-256 of every managed release file before network activity. The built-in self-test exercises a temporary local server; the repository suite covers visible-output defaults, URL and destination controls, dangerous-content classification, SVG active-content detection, safe filenames, duplicate safeguards, and browser-route guardrails.
 
 ## Boundaries
 

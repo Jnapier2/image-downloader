@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.08.08.1
+
+- Adds a persistent queue with automatic save and recovery, bounded to 100 items.
+- Enforces a hard ceiling of three active downloads while retaining adaptive throttling below that limit.
+- Produces a latest-session download list and timestamped session ledgers for reconciliation.
+- Verifies release identity and the SHA-256 of every managed release file before dependency, browser, or network activity.
+- Adds an offline diagnostic/export launcher and keeps queued URLs out of redacted support bundles.
+
 ## 2026.08.02.1
 
 - Neutralizes Windows reserved device names and removes Unicode bidirectional controls before creating output paths.

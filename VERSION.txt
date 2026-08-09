@@ -1,0 +1,7 @@
+Gateway Image Downloader
+Package ID: gateway-image-downloader
+Version: 2026.08.08.1
+Build: v2175-queue-autosave-recovery-3worker-session-list
+Release date: 2026-08-08
+Publisher: Gateway Information Group LLC
+Copyright © 2026 Gateway Information Group LLC. All rights reserved.
