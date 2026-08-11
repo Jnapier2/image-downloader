@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/Jnapier2/image-downloader/actions/workflows/ci.yml/badge.svg)](https://github.com/Jnapier2/image-downloader/actions/workflows/ci.yml)
 
-Image Downloader turns permissioned collection from public pages or direct image URLs into a controlled, repeatable workflow. Bounded discovery, streamed validation, duplicate controls, and resumable state help limit rework and unusable output while preserving clear site-policy and network-safety boundaries.
+Image Downloader turns permitted collection from public pages or direct image URLs into a controlled, repeatable workflow. It combines bounded discovery, streamed validation, duplicate controls, and recoverable state so users can collect usable media without losing track of what ran or where files were written.
 
-**Current release: 2026.08.08.1.** The current build adds a persistent 100-item work queue, automatic recovery after interruption, timestamped session ledgers, and a hard ceiling of three active downloads. It retains the credential-safe evidence, Windows filename protection, and streamed validation introduced in earlier releases.
+**Current release: 2026.08.09.1.** This release adds one stable Windows launcher and keeps generated output beneath the project folder by default. It preserves the 100-item recoverable queue, timestamped session records, and hard limit of three active downloads from the previous build.
 
 ## Collection safeguards
 
@@ -15,9 +15,10 @@ Image Downloader turns permissioned collection from public pages or direct image
 - Network destination checks block credentials-in-URL, loopback, private, link-local, and non-global DNS targets across initial requests, redirects, and optional browser subrequests. Because standard clients resolve hostnames again when connecting, this is defense in depth rather than a complete isolation boundary against hostile DNS rebinding; do not process untrusted URLs from a sensitive network.
 - Persisted URL evidence redacts embedded credentials and common signed-query fields while retaining non-sensitive routing context and an exact-input SHA-256 correlation digest.
 - Duplicate controls at URL, SHA-256 content, filename-conflict, and perceptual-fingerprint layers.
-- Validator-gated partial resume, atomic finalization, adaptive concurrency, bounded retries, and single-instance ownership.
+- Validator-gated partial resume, atomic finalization, adaptive concurrency, bounded retries, and optional same-computer duplicate protection.
 - A project-local queue is saved automatically and can recover unfinished work after an interruption; the queue is bounded at 100 items and active transfers never exceed three.
 - Each session produces a readable latest-download list plus a timestamped ledger for follow-up and reconciliation.
+- Downloads, logs, state, temporary files, reports, and support exports remain project-local unless an absolute external download folder is explicitly configured and validated.
 - A strict five-second per-image network budget covers HEAD preflight, GET attempts, bounded backoff, reconnects, and streamed transfer; page discovery keeps its separate limit.
 - Completed media uses the Windows hidden-file attribute by default as a privacy-conscious filing option; the setting can be disabled without changing file contents.
 
@@ -28,6 +29,10 @@ This tool does **not** bypass authentication, paywalls, access controls, robots/
 ## Quick start
 
 Requirements: Windows 10/11 and Python 3.11 or newer.
+
+For the normal Windows workflow, extract the release to a writable folder and run `GatewayImageDownloader.bat`. Existing shortcuts that use `run_image_downloader.bat` continue to work through a compatibility redirect.
+
+For a manual Python setup:
 
 ```powershell
 py -3 -m venv .venv
@@ -43,7 +48,7 @@ Paste a permitted page or image URL at the prompt. For a one-shot, non-interacti
 python image_downloader.py --standard --dry-run --url "https://example.org/gallery"
 ```
 
-`run_image_downloader.bat` provides the same standard-mode entry point. `run_diagnose_export.bat` creates a redacted, offline support bundle without starting a download.
+`GatewayImageDownloader_DiagnosticsExport.bat` creates a redacted, offline support bundle without starting a download. `GatewayImageDownloader_SafeBrowser.bat` launches the optional trusted-site browser mode.
 
 ## Optional browser mode
 
@@ -61,7 +66,7 @@ Browser mode is not a bypass mechanism. It does not automate login or grant perm
 
 `image_downloader_config.example.json` lists the safety and performance controls. On first run, the application fills omitted values from bounded defaults and writes the resolved settings to the local configuration. Git excludes runtime configuration, downloaded media, indexes, logs, reports, partial transfers, and exports.
 
-The versioned configuration centralizes network timeouts, worker and retry bounds, content limits, duplicate policy, resume policy, browser scope, and visibility defaults.
+The versioned configuration centralizes network timeouts, worker and retry bounds, content limits, duplicate policy, resume policy, browser scope, visibility defaults, and the output destination contract. Relative output paths cannot escape the project root; external destinations require `output_mode` to be set explicitly.
 
 ## Verification
 
@@ -72,7 +77,7 @@ python -m compileall -q image_downloader.py tests
 python -m unittest discover -s tests -v
 ```
 
-The release gate checks the running version, build identity, and SHA-256 of every managed release file before network activity. The built-in self-test exercises a temporary local server; the repository suite covers visible-output defaults, URL and destination controls, dangerous-content classification, SVG active-content detection, safe filenames, duplicate safeguards, and browser-route guardrails.
+The release gate checks the running version, build identity, canonical launcher, output roots, and SHA-256 of every managed release file before network activity. The built-in self-test exercises a temporary local server; the repository suite covers project-local output, URL and destination controls, dangerous-content classification, SVG active-content detection, safe filenames, duplicate safeguards, and browser-route guardrails.
 
 ## Boundaries
 

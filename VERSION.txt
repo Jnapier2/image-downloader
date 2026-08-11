@@ -1,7 +1,11 @@
 Gateway Image Downloader
 Package ID: gateway-image-downloader
-Version: 2026.08.08.1
-Build: v2175-queue-autosave-recovery-3worker-session-list
-Release date: 2026-08-08
+Version: 2026.08.09.1
+Build: v2176-canonical-entrypoint-project-local-outputs
+Release date: 2026-08-09
+Public package refreshed: 2026-08-11
+Canonical launcher: GatewayImageDownloader.bat
+Default output: project-local downloads/
+Support export: exports/IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip
 Publisher: Gateway Information Group LLC
 Copyright © 2026 Gateway Information Group LLC. All rights reserved.

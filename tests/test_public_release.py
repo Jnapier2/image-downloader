@@ -12,12 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class PublicReleaseTests(unittest.TestCase):
     def test_release_identity_is_current_and_complete(self) -> None:
-        self.assertEqual(app.APP_VERSION, "2026.08.08.1")
-        self.assertEqual(app.BUILD_NAME, "v2175-queue-autosave-recovery-3worker-session-list")
+        self.assertEqual(app.APP_VERSION, "2026.08.09.1")
+        self.assertEqual(app.BUILD_NAME, "v2176-canonical-entrypoint-project-local-outputs")
+        self.assertEqual(app.CANONICAL_ENTRYPOINT, "GatewayImageDownloader.bat")
+        self.assertEqual(app.CANONICAL_EXPORT_FILENAME, "IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip")
         status = app.verify_release_identity(ROOT)
         self.assertEqual(status["result"], "PASS")
-        self.assertEqual(status["verified_count"], 13)
-        self.assertEqual(status["managed_count"], 13)
+        self.assertEqual(status["verified_count"], 16)
+        self.assertEqual(status["managed_count"], 16)
         self.assertEqual(status["mismatches"], [])
 
     def test_defaults_keep_work_bounded_and_recoverable(self) -> None:
@@ -29,6 +31,11 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertTrue(config["download_queue_recovery_enabled"])
         self.assertTrue(config["session_download_list_enabled"])
         self.assertTrue(config["hide_downloaded_media"])
+        self.assertEqual(config["output_mode"], "project_local")
+        self.assertEqual(config["output"], "downloads")
+        output, mode = app.resolve_download_output(ROOT, config)
+        self.assertEqual(output, (ROOT / "downloads").resolve())
+        self.assertEqual(mode, "project_local")
 
     def test_example_config_matches_current_bounds(self) -> None:
         payload = json.loads((ROOT / "image_downloader_config.example.json").read_text(encoding="utf-8"))
@@ -37,6 +44,8 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertEqual(payload["workers"], 3)
         self.assertEqual(payload["adaptive_throttle_max_workers"], 3)
         self.assertEqual(payload["download_queue_capacity"], 100)
+        self.assertEqual(payload["output"], "downloads")
+        self.assertEqual(payload["output_mode"], "project_local")
 
     def test_url_and_content_helpers_reject_unsafe_inputs(self) -> None:
         for value in ("javascript:alert(1)", "file:///private/image.png", "data:image/png;base64,AAAA"):
