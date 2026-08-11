@@ -3,7 +3,7 @@
 Image Downloader - lean Windows-friendly image downloader.
 
 Asset ID: IMGDL-SOURCE-PY
-Version: 2026.08.08.1
+Version: 2026.08.09.1
 Status: current
 Sensitivity: public-source
 Tags: image-downloader, python-source, windows-utility, diagnostics, smart-safe-automation, canonical-export, helpful-computer-awareness, asset-metadata
@@ -57,9 +57,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 APP_NAME = "Gateway Image Downloader"
-APP_VERSION = "2026.08.08.1"
-BUILD_NAME = "v2175-queue-autosave-recovery-3worker-session-list"
-BUILD_DATE = "2026-08-08 11:12 CDT"
+APP_VERSION = "2026.08.09.1"
+BUILD_NAME = "v2176-canonical-entrypoint-project-local-outputs"
+BUILD_DATE = "2026-08-09 15:39 CDT"
 CONFIG_FILENAME = "image_downloader_config.json"
 SCRIPT_FILENAME = "image_downloader.py"
 STATE_DIRNAME = "state"
@@ -67,6 +67,26 @@ LOG_DIRNAME = "logs"
 REPORT_DIRNAME = "reports"
 EXPORT_DIRNAME = "exports"
 CANONICAL_EXPORT_FILENAME = "IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip"
+EXECUTION_NAMESPACE = "GatewayImageDownloader"
+CANONICAL_ENTRYPOINT = "GatewayImageDownloader.bat"
+SAFE_BROWSER_ENTRYPOINT = "GatewayImageDownloader_SafeBrowser.bat"
+DIAGNOSTICS_EXPORT_ENTRYPOINT = "GatewayImageDownloader_DiagnosticsExport.bat"
+APPROVED_LEGACY_ENTRYPOINT_ALIASES = (
+    "run_image_downloader.bat",
+    "run_image_downloader_safe_browser.bat",
+    "run_diagnose_export.bat",
+)
+TEMP_DIRNAME = "temp"
+PROJECT_OUTPUT_ROOTS = {
+    "config_file": CONFIG_FILENAME,
+    "downloads": "downloads",
+    "logs": LOG_DIRNAME,
+    "state": STATE_DIRNAME,
+    "temp": TEMP_DIRNAME,
+    "reports": REPORT_DIRNAME,
+    "exports": EXPORT_DIRNAME,
+    "backups": f"{STATE_DIRNAME}/migration_backups",
+}
 DOWNLOAD_INDEX_FILENAME = "download_index.json"
 RECENT_RUN_FILENAME = "recent_run_summary.json"
 RECENT_FAILURES_FILENAME = "recent_failures_errors.json"
@@ -75,7 +95,7 @@ SEQUENCE_STATS_FILENAME = "sequential_search_stats.json"
 LOG_FILENAME = "image_downloader.log"
 INSTANCE_LOCK_FILENAME = "image_downloader_instance.lock"
 INSTANCE_EVENTS_FILENAME = "instance_guard_events.json"
-CONFIG_SCHEMA_VERSION = 4
+CONFIG_SCHEMA_VERSION = 5
 STATE_SCHEMA_VERSION = 2
 MIGRATION_BACKUP_DIRNAME = "migration_backups"
 EXPORT_AUDIT_FILENAME = "deep_conflict_audit.txt"
@@ -130,7 +150,7 @@ EXPORT_FILE_LIMIT = 20
 EXPORT_MAX_ENTRY_BYTES = 5 * 1024 * 1024
 EXPORT_MAX_TOTAL_BYTES = 12 * 1024 * 1024
 EXPORT_SNAPSHOT_ATTEMPTS = 3
-PARAMETER_ALIGNMENT_VERSION = "v2.17.5-runtime-release-identity-managed-file-integrity-gate"
+PARAMETER_ALIGNMENT_VERSION = "project-framework-2026.08.09"
 ASSET_METADATA_SCHEMA = "asset-metadata-v1"
 PROJECT_SLUG = "image-downloader"
 PACKAGE_ASSET_ID = "IMGDL-PACKAGE"
@@ -142,8 +162,8 @@ RELEASE_IDENTITY_EXIT_CODE = 23
 RUNTIME_IDENTITY_GATE_VERSION = "runtime-release-identity-v1"
 ASSET_STATUS = "current"
 ASSET_SENSITIVITY = "public-source"
-INTENDED_RELEASE_ARCHIVE_PATH = "support_Project_Vault/30_UTILITIES_AND_WINDOWS_TOOLS/ImageDownloader/02_LATEST_BUILD"
-ARCHIVE_PROJECT_PATH = "support_Project_Vault/30_UTILITIES_AND_WINDOWS_TOOLS/ImageDownloader"
+INTENDED_DRIVE_VAULT_PATH = "support_archive/30_UTILITIES_AND_WINDOWS_TOOLS/ImageDownloader/02_LATEST_BUILD"
+DRIVE_PROJECT_PATH = "support_archive/30_UTILITIES_AND_WINDOWS_TOOLS/ImageDownloader"
 RETRYABLE_HTTP_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 COMMON_RASTER_FORMATS = {"jpg", "jpeg", "png", "gif", "webp", "bmp", "tiff"}
 
@@ -307,7 +327,7 @@ def _safe_managed_release_path(root: Path, raw_path: Any) -> Tuple[Optional[str]
 
 
 def verify_release_identity(root: Path) -> Dict[str, Any]:
-    """Read-only v2.17.5 release-identity and managed-file verification gate."""
+    """Read-only release-identity and managed-file verification gate."""
     root = root.resolve()
     started = time.monotonic()
     evidence: Dict[str, Any] = {
@@ -316,6 +336,12 @@ def verify_release_identity(root: Path) -> Dict[str, Any]:
         "started_at": now_local(),
         "project_root": safe_display_path(root),
         "running": {"package_id": PACKAGE_ID, "version": APP_VERSION, "build_id": BUILD_NAME},
+        "execution": {
+            "execution_namespace": EXECUTION_NAMESPACE,
+            "canonical_entrypoint": CANONICAL_ENTRYPOINT,
+            "backend_target": SCRIPT_FILENAME,
+            "project_output_roots": PROJECT_OUTPUT_ROOTS,
+        },
         "controls": {},
         "managed_count": 0,
         "verified_count": 0,
@@ -368,6 +394,21 @@ def verify_release_identity(root: Path) -> Dict[str, Any]:
             if observed != expected:
                 _release_identity_mismatch(evidence, "identity_mismatch", f"{name}:{field}", expected, observed)
 
+    expected_execution = {
+        "execution_namespace": EXECUTION_NAMESPACE,
+        "canonical_entrypoint": CANONICAL_ENTRYPOINT,
+        "backend_target": SCRIPT_FILENAME,
+        "project_output_roots": PROJECT_OUTPUT_ROOTS,
+    }
+    for control_name in (MANIFEST_FILENAME, PACKAGE_METADATA_FILENAME):
+        control_data = parsed.get(control_name, {})
+        if not isinstance(control_data, dict):
+            continue
+        for field, expected in expected_execution.items():
+            observed = control_data.get(field)
+            if observed != expected:
+                _release_identity_mismatch(evidence, "execution_output_identity_mismatch", f"{control_name}:{field}", expected, observed)
+
     manifest = parsed.get(MANIFEST_FILENAME, {})
     files = manifest.get("files") if isinstance(manifest, dict) else None
     if not isinstance(files, list):
@@ -390,7 +431,7 @@ def verify_release_identity(root: Path) -> Dict[str, Any]:
             continue
         seen.add(dedupe_key)
         managed_paths.add(normalized)
-        if normalized == CONFIG_FILENAME or normalized.split("/", 1)[0] in {STATE_DIRNAME, LOG_DIRNAME, REPORT_DIRNAME, EXPORT_DIRNAME, "downloads", "cache", "caches"}:
+        if normalized == CONFIG_FILENAME or normalized.split("/", 1)[0] in {STATE_DIRNAME, LOG_DIRNAME, REPORT_DIRNAME, EXPORT_DIRNAME, TEMP_DIRNAME, "downloads", "cache", "caches"}:
             _release_identity_mismatch(evidence, "mutable_file_marked_managed", normalized, "package_managed=false", "package_managed=true")
             continue
         if not target.is_file():
@@ -419,9 +460,10 @@ def verify_release_identity(root: Path) -> Dict[str, Any]:
         SCRIPT_FILENAME,
         VERSION_FILENAME,
         PACKAGE_METADATA_FILENAME,
-        "run_image_downloader.bat",
-        "run_image_downloader_safe_browser.bat",
-        "run_diagnose_export.bat",
+        CANONICAL_ENTRYPOINT,
+        SAFE_BROWSER_ENTRYPOINT,
+        DIAGNOSTICS_EXPORT_ENTRYPOINT,
+        *APPROVED_LEGACY_ENTRYPOINT_ALIASES,
     }
     for required in sorted(required_managed - managed_paths):
         _release_identity_mismatch(evidence, "required_managed_file_unlisted", required, "package_managed=true", "not listed as managed")
@@ -445,6 +487,9 @@ def release_identity_summary(root: Path, evidence: Optional[Dict[str, Any]] = No
         f"- Result: {ev.get('result', 'BLOCK')}",
         f"- Gate: {ev.get('gate_version', RUNTIME_IDENTITY_GATE_VERSION)}",
         f"- Running package/version/build: {PACKAGE_ID} / {APP_VERSION} / {BUILD_NAME}",
+        f"- Execution namespace / canonical entrypoint: {EXECUTION_NAMESPACE} / {CANONICAL_ENTRYPOINT}",
+        f"- Backend target: {SCRIPT_FILENAME}",
+        f"- Project output roots: {json.dumps(PROJECT_OUTPUT_ROOTS, sort_keys=True)}",
         f"- Managed files verified: {ev.get('verified_count', 0)}/{ev.get('managed_count', 0)}",
         f"- Gate duration ms: {ev.get('duration_ms', 0)}",
         f"- Authenticated/network runtime allowed only after PASS: {bool(ev.get('authenticated_activity_allowed', False))}",
@@ -752,7 +797,7 @@ def computer_awareness_summary(root: Path, config_path: Path) -> str:
         f"- Optional label override: {cfg.get('computer_profile_override_env_name', COMPUTER_PROFILE_OVERRIDE_ENV)}",
         "- Launch permission: never changed by computer identity.",
         "- Runtime state/log/report paths: shared project-local layout; no computer overlay.",
-        "- Locks/ownership/support: no computer-specific ownership credential, coordination hold, election, or cross-computer gate.",
+        "- Locks/ownership/handoff: no computer-specific ownership credential, coordination hold, election, or cross-computer gate.",
         "- Worker limits/features: adaptive throttle and config remain authoritative; the label does not restrict or unlock features.",
     ]
     if ctx.get("warning"):
@@ -767,7 +812,7 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         f"Generated: {now_local()}",
         f"Version: {APP_VERSION}",
         f"Build: {BUILD_NAME}",
-        "Source: v2.17.5 runtime-identity/integrity project defaults with helpful computer awareness limited to nonrestrictive diagnostics",
+        "Source: current public release framework with preserved runtime integrity and nonrestrictive computer awareness",
         "",
         "Runtime snapshot (redacted):",
         f"- Project root: {safe_display_path(root)}",
@@ -795,7 +840,7 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         "- Computer recognition uses known aliases or a short privacy-safe hash and remains diagnostic-only.",
         "- Package remains Norton/Windows Security friendly: no bundled executables, no hidden execution, no downloaded-file auto-run, no firewall/service/autostart changes.",
         f"- Downloaded media hidden-file default: {bool(cfg.get('hide_downloaded_media', True))}; this changes only the Windows file attribute on completed image files.",
-        f"- Runtime VPN/IP resilience enabled: {bool(cfg.get('network_resilience_enabled', True))}",
+        f"- Backend VPN/IP resilience enabled: {bool(cfg.get('network_resilience_enabled', True))}",
         f"- HTTP session refresh on network error: {bool(cfg.get('network_reset_session_on_error', True))}",
         f"- Optional browser context reset on browser/network error: {bool(cfg.get('network_browser_reset_on_error', True))}",
         "",
@@ -804,9 +849,9 @@ def system_aware_environment_summary(root: Path, config_path: Path) -> str:
         "- This project performs public HTTP(S) image/page fetches only; it does not store credentials, cookies, webhooks, wallet keys, or API tokens.",
         "- Per-site permission/terms remain user responsibility because pasted URLs can point to arbitrary third-party websites.",
         "",
-        "Sanitized PC-context assumptions from current release integrity policy:",
+        "Sanitized PC-context assumptions from current release framework:",
         "- Treat Windows 11 Pro, Python 3.13-class runtime, Norton/VPN presence, and multi-drive storage as expected context, but verify live state before sensitive changes.",
-        "- Keep outputs folder-local and prefer ZIP support; do not carry raw PC reports or hardware identifiers forward.",
+        "- Keep outputs folder-local and prefer ZIP handoff; do not carry raw PC reports or hardware identifiers forward.",
     ]
     return "\n".join(lines).rstrip() + "\n"
 
@@ -935,6 +980,7 @@ def default_config() -> Dict[str, Any]:
         "config_schema_version": CONFIG_SCHEMA_VERSION,
         "state_schema_version": STATE_SCHEMA_VERSION,
         "output": "downloads",
+        "output_mode": "project_local",
         "hide_downloaded_media": True,
         "timeout": 5,
         "connect_timeout": 3,
@@ -1035,22 +1081,22 @@ def default_config() -> Dict[str, Any]:
             "status": ASSET_STATUS,
             "sensitivity": ASSET_SENSITIVITY,
             "tags": ["image-downloader", "config", "standard-mode", "smart-safe-automation", "canonical-export", "portable", "helpful-computer-awareness", "asset-metadata"],
-            "lineage": "supersedes IMGDL-CONFIG@2026.08.07.1; aligns with v2.17.5 while remaining mutable and intentionally excluded from package-managed release hashing",
+            "lineage": "supersedes IMGDL-CONFIG@2026.08.08.1; adds the stable launcher and project-local output contract while remaining mutable and intentionally excluded from package-managed release hashing",
             "copyright_notice": "Copyright © 2026 Gateway Information Group LLC. All rights reserved.",
         },
         "google_drive_vault_sync_status": "not_configured_local_runtime",
         "google_drive_reference_check_status": "verified",
-        "google_drive_reference_check_note": "local v2.17.5-aligned maintenance release prepared on 2026-08-07; Drive upload/sync not performed or claimed",
-        "google_drive_intended_vault_path": INTENDED_RELEASE_ARCHIVE_PATH,
+        "google_drive_reference_check_note": "local current maintenance release prepared on 2026-08-09; Drive upload/sync not performed or claimed",
+        "google_drive_intended_vault_path": INTENDED_DRIVE_VAULT_PATH,
         "google_drive_project_category": "30_UTILITIES_AND_WINDOWS_TOOLS",
-        "google_drive_project_path": ARCHIVE_PROJECT_PATH,
-        "google_drive_latest_build_path": INTENDED_RELEASE_ARCHIVE_PATH,
-        "google_drive_source_of_truth_path": ARCHIVE_PROJECT_PATH + "/00_SOURCE_OF_TRUTH",
-        "external_archive_support_path": ARCHIVE_PROJECT_PATH + "/support-ready",
-        "google_drive_diagnostics_path": ARCHIVE_PROJECT_PATH + "/03_DIAGNOSTICS",
-        "google_drive_docs_runbook_path": ARCHIVE_PROJECT_PATH + "/04_DOCS_RUNBOOK",
-        "google_drive_changelog_manifest_path": ARCHIVE_PROJECT_PATH + "/05_CHANGELOG_MANIFEST",
-        "google_drive_archive_path": ARCHIVE_PROJECT_PATH + "/06_ARCHIVE",
+        "google_drive_project_path": DRIVE_PROJECT_PATH,
+        "google_drive_latest_build_path": INTENDED_DRIVE_VAULT_PATH,
+        "google_drive_source_of_truth_path": DRIVE_PROJECT_PATH + "/00_SOURCE_OF_TRUTH",
+        "google_drive_support_ready_path": DRIVE_PROJECT_PATH + "/01_SUPPORT_READY",
+        "google_drive_diagnostics_path": DRIVE_PROJECT_PATH + "/03_DIAGNOSTICS",
+        "google_drive_docs_runbook_path": DRIVE_PROJECT_PATH + "/04_DOCS_RUNBOOK",
+        "google_drive_changelog_manifest_path": DRIVE_PROJECT_PATH + "/05_CHANGELOG_MANIFEST",
+        "google_drive_archive_path": DRIVE_PROJECT_PATH + "/06_ARCHIVE",
         "custom_input_assurance_enabled": True,
         "platform_api_compliance_enabled": True,
         "platform_review_mode": "cached_off_critical_path",
@@ -1104,7 +1150,7 @@ def default_config() -> Dict[str, Any]:
         "log_tail_lines_for_export": 400,
         "canonical_export_filename": CANONICAL_EXPORT_FILENAME,
         "export_keep_previous_zips": 0,
-        "export_location_mode": "project_root_canonical",
+        "export_location_mode": "project_exports_canonical",
         "trusted_sites_note": (
             "Safe Browser Mode uses Playwright/Chromium only when launched explicitly; "
             "use it only for trusted sites."
@@ -1115,13 +1161,13 @@ def default_config() -> Dict[str, Any]:
             "direct ZIP upload may require manual Drive placement when connector upload is unavailable"
         ),
         "preferred_bot_dir": ".",
-        "bot_dir_env_override_name": "IMAGE_DOWNLOADER_BOT_DIR",
-        "path_targeting_mode": "project_folder_then_valid_env_override_then_legacy_fallback",
-        "portable_fallback_enabled": True,
-        "relocation_repair_status": "portable_project_folder_no_auto_sync_no_user_data_delete",
+        "bot_dir_env_override_name": "",
+        "path_targeting_mode": "canonical_launcher_or_script_root_only",
+        "portable_fallback_enabled": False,
+        "relocation_repair_status": "canonical_root_relative_project_local_no_auto_sync_no_user_data_delete",
         "omission_control_status": "coverage_ledger_plus_queue_recovery_three_worker_cap_session_timestamps_portable_launch_privacy_and_runtime_evidence",
-        "omission_control_coverage_note": "Startup, persistent 100-item queue autosave/recovery, hard three-download concurrency, timestamped session download-list output, project-folder-first path targeting, nonrestrictive computer labeling, credential-safe URL evidence, Windows-reserved filename safety, one canonical Export20 ZIP, runtime-evidence completeness, and package verification are tracked before completion claims.",
-        "thread_context_health_status": "green_v2175_queue_recovery_upgrade",
+        "omission_control_coverage_note": "Startup, persistent 100-item queue autosave/recovery, hard three-download concurrency, timestamped session download-list output, canonical-launcher/project-root path targeting, nonrestrictive computer labeling, credential-safe URL evidence, Windows-reserved filename safety, one canonical Export20 ZIP, runtime-evidence completeness, and package verification are tracked before completion claims.",
+        "thread_context_health_status": "green_v2176_execution_output_alignment",
     }
 
 
@@ -1141,7 +1187,7 @@ def downloaded_asset_id(digest: str) -> str:
 
 
 def enrich_download_asset_record(record: Dict[str, Any], *, digest: str = "", url: str = "") -> Dict[str, Any]:
-    """Add compact current-release metadata to an existing download-index record."""
+    """Add compact release-framework metadata to an existing download-index record."""
     value = dict(record) if isinstance(record, dict) else {}
     digest_value = str(digest or value.get("sha256") or "")
     path_value = str(value.get("path") or "")
@@ -1297,8 +1343,10 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg["computer_profile_override_env_name"] = str(cfg.get("computer_profile_override_env_name") or COMPUTER_PROFILE_OVERRIDE_ENV)
     if str(cfg.get("auto_browser_fallback_policy", "manual_trusted_sites_only")) not in {"manual_trusted_sites_only"}:
         cfg["auto_browser_fallback_policy"] = "manual_trusted_sites_only"
-    if str(cfg.get("export_location_mode", "project_root_canonical")) not in {"project_root_canonical"}:
-        cfg["export_location_mode"] = "project_root_canonical"
+    if str(cfg.get("export_location_mode", "project_exports_canonical")) not in {"project_exports_canonical"}:
+        cfg["export_location_mode"] = "project_exports_canonical"
+    if str(cfg.get("output_mode", "project_local")) not in {"project_local", "external_explicit"}:
+        cfg["output_mode"] = "project_local"
     canonical_export_name = Path(str(cfg.get("canonical_export_filename", CANONICAL_EXPORT_FILENAME))).name
     if not canonical_export_name.lower().endswith(".zip"):
         canonical_export_name += ".zip"
@@ -1338,7 +1386,7 @@ def normalize_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     else:
         cfg["google_drive_reference_check_status"] = drive_ref_status
         cfg["google_drive_reference_check_note"] = str(cfg.get("google_drive_reference_check_note") or "")
-    cfg["google_drive_intended_vault_path"] = str(cfg.get("google_drive_intended_vault_path") or INTENDED_RELEASE_ARCHIVE_PATH)
+    cfg["google_drive_intended_vault_path"] = str(cfg.get("google_drive_intended_vault_path") or INTENDED_DRIVE_VAULT_PATH)
     for key in [
         "preferred_bot_dir",
         "bot_dir_env_override_name",
@@ -1383,6 +1431,9 @@ def load_or_create_config(path: Path) -> Tuple[Dict[str, Any], bool]:
             "Use a newer Image Downloader build or restore a compatible config backup."
         )
     cfg = merge_config(existing)
+    if existed and source_schema < 5 and "output_mode" not in existing:
+        legacy_output = Path(str(existing.get("output", "downloads")))
+        cfg["output_mode"] = "external_explicit" if legacy_output.is_absolute() else "project_local"
     changed = (not existed) or any(k not in existing for k in default_config().keys()) or source_schema != CONFIG_SCHEMA_VERSION
     if source_schema < CONFIG_SCHEMA_VERSION:
         backup_ref = backup_file_for_migration(
@@ -1427,7 +1478,7 @@ def require_requests():
         return requests
     except Exception as exc:
         raise RuntimeError(
-            "The requests package is required. Run run_image_downloader.bat so it can install core packages, "
+            f"The requests package is required. Run {CANONICAL_ENTRYPOINT} so it can install core packages, "
             "or install it with: python -m pip install requests beautifulsoup4 pillow"
         ) from exc
 
@@ -2444,6 +2495,51 @@ class InstanceGuard:
             self.acquired = False
 
 
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def resolve_download_output(root: Path, cfg: Dict[str, Any]) -> Tuple[Path, str]:
+    """Resolve the configured download output under the project-local output contract."""
+    root = root.resolve()
+    raw = str(cfg.get("output", "downloads") or "downloads").strip()
+    mode = str(cfg.get("output_mode", "project_local") or "project_local")
+    candidate = Path(raw)
+    if mode == "project_local":
+        if candidate.is_absolute():
+            raise RuntimeError(
+                "output_mode=project_local requires a root-relative output path. "
+                "Use output_mode=external_explicit only for an intentional absolute destination."
+            )
+        resolved = (root / candidate).resolve()
+        if not _path_is_within(resolved, root):
+            raise RuntimeError("Configured project-local output escapes the project root; correct the output path before launch.")
+        return resolved, "project_local"
+    if mode != "external_explicit":
+        raise RuntimeError(f"Unsupported output_mode: {mode}")
+    if not candidate.is_absolute():
+        raise RuntimeError("output_mode=external_explicit requires an absolute output path.")
+    resolved = candidate.resolve()
+    anchor = Path(resolved.anchor).resolve() if resolved.anchor else None
+    if anchor is not None and resolved == anchor:
+        raise RuntimeError("External output may not be a drive/filesystem root.")
+    return resolved, "external_explicit"
+
+
+def verify_writable_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    probe = path / f".imgdl_write_test_{uuid.uuid4().hex[:8]}.tmp"
+    try:
+        probe.write_text("ok\n", encoding="utf-8")
+    finally:
+        with contextlib.suppress(OSError):
+            probe.unlink()
+
+
 class ImageDownloader:
     def __init__(self, root: Path, config_path: Optional[Path] = None, *, browser_mode: Optional[bool] = None, dry_run: Optional[bool] = None, top_level_run_id: Optional[str] = None, instance_guard: Optional[InstanceGuard] = None):
         self.root = root.resolve()
@@ -2484,8 +2580,11 @@ class ImageDownloader:
         self.log_dir = self.root / LOG_DIRNAME
         self.report_dir = self.root / REPORT_DIRNAME
         self.export_dir = self.root / EXPORT_DIRNAME
-        for path in (self.state_dir, self.partial_dir, self.log_dir, self.report_dir, self.export_dir, self.output_dir):
+        self.temp_dir = self.root / TEMP_DIRNAME
+        self._output_dir, self._output_mode = resolve_download_output(self.root, self.config)
+        for path in (self.state_dir, self.partial_dir, self.log_dir, self.report_dir, self.export_dir, self.temp_dir):
             path.mkdir(parents=True, exist_ok=True)
+        verify_writable_directory(self._output_dir)
         self.logger = configure_logging(self.root, self.config)
         self._queue_lock = threading.RLock()
         self.session_id = make_run_id("session")
@@ -2533,10 +2632,11 @@ class ImageDownloader:
 
     @property
     def output_dir(self) -> Path:
-        output = Path(str(self.config.get("output", "downloads")))
-        if not output.is_absolute():
-            output = self.root / output
-        return output
+        return self._output_dir
+
+    @property
+    def output_mode(self) -> str:
+        return self._output_mode
 
     @property
     def timeout(self) -> int:
@@ -3574,7 +3674,12 @@ class ImageDownloader:
             "input_url_sha256": sha256_bytes(input_url.encode("utf-8", errors="ignore")),
             "mode": "Safe Browser Mode" if self.config.get("browser_mode") else "Standard Mode",
             "dry_run": bool(self.config.get("dry_run", False)),
+            "execution_namespace": EXECUTION_NAMESPACE,
+            "canonical_entrypoint": CANONICAL_ENTRYPOINT,
+            "project_root": str(self.root),
+            "output_mode": self.output_mode,
             "output_dir": str(self.output_dir),
+            "exports_dir": str(self.export_dir),
             "config_schema_version": self.config.get("config_schema_version", CONFIG_SCHEMA_VERSION),
             "state_schema_version": self.state.get("state_schema_version", STATE_SCHEMA_VERSION),
             "computer_awareness": self.computer_context,
@@ -5071,11 +5176,11 @@ def dependency_environment_summary(root: Path, config_path: Path) -> str:
         "Best-practices compliance:",
         f"- Parameter alignment: {PARAMETER_ALIGNMENT_VERSION}.",
         "- Package-level MANIFEST.json, CHANGELOG.md, README_QUICK_START.md, and VERSION.txt are maintained; known-good/transfer/health evidence is generated into Export20.",
-        "- Export20 collector is updated when runtime behavior changes and stays at or below 20 files.",
+        "- Export20 collector is updated when backend behavior changes and stays at or below 20 files.",
         "- Runtime folders/caches/downloads are excluded from release ZIPs and support exports.",
-        "- v2.17.5 system-aware diagnostics are redacted and avoid raw PC identifiers.",
-        "- v2.17.5 structured external release archive status is recorded without making local runtime depend on Drive.",
-        "- v2.17.5 custom-input/config/path assurance is summarized without adding a new menu option.",
+        "- System-aware diagnostics are redacted and avoid raw PC identifiers.",
+        "- Structured Drive Project Vault status is recorded without making local runtime depend on Drive.",
+        "- Custom-input, configuration, and path assurance is summarized without adding a new menu option.",
         "- v2.9+ integration drift evidence remains compact, cached, and off the normal startup path.",
         "- Launcher hardening: launchers prove Python works, verify write access, require complete release controls for override/fallback targets, run the identity gate before dependency installs, and preserve failure exit codes.",
         "- Export hotfix: diagnostic/export runs do not take the interactive lock, use unique filenames, and publish ZIPs atomically after successful creation.",
@@ -5090,7 +5195,7 @@ def dependency_environment_summary(root: Path, config_path: Path) -> str:
         "",
         asset_metadata_reconciliation_summary(root, config_path).rstrip(),
         "",
-        release_archive_status_summary(root, config_path).rstrip(),
+        drive_vault_status_summary(root, config_path).rstrip(),
         "",
         parameter_alignment_summary(root, config_path).rstrip(),
         "",
@@ -5196,7 +5301,7 @@ def config_input_assurance_summary(root: Path, config_path: Path) -> str:
         f"- Unknown/custom keys: {len(unknown_keys)}",
         f"- Status: {status}",
         "- Verification chain: all known keys are recognized and normalized; runtime keys are mapped where consumed; launcher-contract keys are verified against BAT behavior; evidence/transfer metadata is reported but is not falsely presented as exercised downloader logic.",
-        "- Source precedence: CLI flags override session mode for browser/dry-run; image_downloader_config.json overrides defaults; defaults fill missing optional values; IMAGE_DOWNLOADER_BOT_DIR is consumed by launchers rather than Python config parsing.",
+        "- Source precedence: CLI flags override session mode for browser/dry-run; image_downloader_config.json overrides defaults; defaults fill missing optional values; canonical launcher/script location determines project_root.",
         "- Compatibility note: launcher_sync_installed_files is retained as launcher-policy metadata. The actual project-folder-first targeting and compatibility fallback behavior is implemented and statically verified in the BAT launchers.",
         "- Secrets: no credential-bearing fields are required; redaction still covers common token/password/key names if accidentally present.",
         f"- Effective-input fingerprint: {hashlib.sha256(fingerprint_source.encode('utf-8')).hexdigest()[:16]}",
@@ -5321,16 +5426,16 @@ def asset_metadata_reconciliation_summary(root: Path, config_path: Path) -> str:
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
-def release_archive_status_summary(root: Path, config_path: Path) -> str:
+def drive_vault_status_summary(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
-    project_path = str(cfg.get("google_drive_project_path") or ARCHIVE_PROJECT_PATH)
-    intended_path = str(cfg.get("google_drive_intended_vault_path") or INTENDED_RELEASE_ARCHIVE_PATH)
+    project_path = str(cfg.get("google_drive_project_path") or DRIVE_PROJECT_PATH)
+    intended_path = str(cfg.get("google_drive_intended_vault_path") or INTENDED_DRIVE_VAULT_PATH)
     lines = [
-        "Optional external archive status:",
+        "Google Drive vault/reference status:",
         f"- Intended vault project path: {project_path}",
         f"- Intended latest-build path: {intended_path}",
         f"- Source-of-truth path: {cfg.get('google_drive_source_of_truth_path', project_path + '/00_SOURCE_OF_TRUTH')}",
-        f"- Optional external archive path: {cfg.get('external_archive_support_path', project_path + '/support-ready')}",
+        f"- support-ready path: {cfg.get('google_drive_support_ready_path', project_path + '/01_SUPPORT_READY')}",
         f"- Diagnostics path: {cfg.get('google_drive_diagnostics_path', project_path + '/03_DIAGNOSTICS')}",
         f"- Docs/runbook path: {cfg.get('google_drive_docs_runbook_path', project_path + '/04_DOCS_RUNBOOK')}",
         f"- Changelog/manifest path: {cfg.get('google_drive_changelog_manifest_path', project_path + '/05_CHANGELOG_MANIFEST')}",
@@ -5340,7 +5445,7 @@ def release_archive_status_summary(root: Path, config_path: Path) -> str:
         f"- Local runtime reference-check note: {cfg.get('google_drive_reference_check_note', 'structured_folder_exists_no_zip_upload')}",
         "- Drive lookup note: official structured ImageDownloader folder was found under the vault utilities category; similarly named folders outside the official vault path should be staged/merged manually, not deleted blindly.",
         "- Runtime dependency: none; Image Downloader runs, diagnoses, and exports offline without Drive.",
-        "- Support expectation: upload/mirror the final source-of-truth ZIP under the structured release archive latest-build/source-of-truth folders when a archive integration or manual upload is available.",
+        "- Handoff expectation: upload/mirror the final source-of-truth ZIP under the structured Project Vault latest-build/source-of-truth folders when a Drive connector or manual upload is available.",
         "- Secret handling: no raw Drive IDs, permission lists, account identifiers, or secret-bearing links are stored in runtime diagnostics.",
     ]
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
@@ -5349,23 +5454,25 @@ def release_archive_status_summary(root: Path, config_path: Path) -> str:
 def parameter_alignment_summary(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
     lines = [
-        "Current-release alignment snapshot:",
-        f"- Release integrity baseline: {PARAMETER_ALIGNMENT_VERSION}",
+        "Release framework snapshot:",
+        f"- Release framework: {PARAMETER_ALIGNMENT_VERSION}",
         "- Timer-safe pass posture: startup/import/config/path issues first, then conflicts/version drift, stability, diagnostics/export, verification, and clean ZIP output before broad features.",
         f"- App version/build: {APP_VERSION} / {BUILD_NAME}",
         "- Output strategy: full ZIP package only; no inline source required for normal delivery.",
-        "- Lean structure: one Python source, one mutable config, three small BAT entry points, one README/runbook, one changelog, VERSION.txt, MANIFEST.json, PACKAGE_METADATA.json, one Drive upload CSV manifest, and one engineering-output file.",
+        "- Lean structure: one Python source, one mutable config, one canonical BAT plus two namespaced helper BATs and three legacy redirect shims, one README/runbook, one changelog, VERSION.txt, MANIFEST.json, PACKAGE_METADATA.json, one Drive upload CSV manifest, and one engineering-output file.",
         f"- Runtime identity gate: {verify_release_identity(root).get('result')} before dependency/authenticated/network runtime; every package_managed=true release file is size/SHA256 verified.",
         "- Preserve-working-strategy status: Smart Safe Automation uses Standard Mode first and automatically applies duplicate detection, resume, reconnect, adaptive throttle, numbered sequence discovery, and conservative same-domain gallery pagination; Safe Browser and dry-run remain manual trust/safety choices.",
         "- Duplicate autodetection: URL, candidate, SHA256, exact visual fingerprint, filename-conflict, and bounded existing-library reconciliation evidence is recorded without automatic deletion.",
-        "- Diagnostics/export: one canonical project-root IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip, allowlisted/redacted Export20 evidence, atomic replacement, old-export cleanup, and no recursive archive inclusion.",
-        "- Portability: root-layout ZIP, launchers use the extracted project folder first, accept IMAGE_DOWNLOADER_BOT_DIR only for a complete project, and retain C:\\Bots\\ImageDownloader only as a compatibility fallback; supports spaces in paths.",
+        "- Diagnostics/export: one canonical project-local exports/IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip, allowlisted/redacted Export20 evidence, atomic replacement, old-export cleanup, and no recursive archive inclusion.",
+        "- Portability: root-layout ZIP with stable GatewayImageDownloader execution namespace; canonical launcher resolves its own folder, legacy run_*.bat names are thin redirects, and no caller-CWD/Desktop/Downloads/C:\\Bots fallback is used; paths with spaces remain supported.",
         "- Helpful computer awareness: ALPHA, ASCEND, DeusEx/Raider/GE66, or a privacy-safe generic host may be labeled for console/log/diagnostic context only; no identity-based restrictions or runtime overlays are active.",
         "- Omission/triage control: coverage ledger plus Critical/High/Normal/Optional exit status is included in diagnostics/export and full batch output.",
         "- Security/Norton posture: no bundled executables, no hidden execution, no auto-opening downloaded files, no service/firewall/autostart changes.",
         "- Drive-vault rule: tracked as structured vault status/intended category/project/build path; local tool does not require Drive authentication or online access.",
         "- Asset metadata: one canonical release manifest, embedded key-asset metadata, merged Drive CSV view, central content-addressed runtime image records, and release/export ZIP comments; no per-file sidecars.",
         f"- Config parameter_alignment_version: {cfg.get('parameter_alignment_version', PARAMETER_ALIGNMENT_VERSION)}",
+        f"- Config output_mode: {cfg.get('output_mode', 'project_local')}",
+        f"- Canonical support export: {EXPORT_DIRNAME}/{CANONICAL_EXPORT_FILENAME}",
     ]
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
@@ -5439,7 +5546,7 @@ def archive_nested_release_folder(root: Path, cfg: Dict[str, Any]) -> Dict[str, 
         result["status"] = "disabled"
         return result
     nested = root / "ImageDownloader"
-    markers = [SCRIPT_FILENAME, "run_image_downloader.bat", CONFIG_FILENAME]
+    markers = [SCRIPT_FILENAME, CANONICAL_ENTRYPOINT, CONFIG_FILENAME]
     if not nested.is_dir() or not any((nested / name).exists() for name in markers):
         result["status"] = "no_nested_package_copy_detected"
         return result
@@ -5556,20 +5663,20 @@ def known_good_state_note(root: Path, config_path: Path) -> str:
         "",
         "Known-good marker:",
         "- Current package builds on the user-confirmed working 2026.08.07.1 / v2175 runtime-identity release.",
-        "- Working downloader behavior and the v2.17.5 integrity gate are preserved while persistent queue autosave/recovery, timestamped session download lists, and a hard three-active-download ceiling are added.",
+        "- Working queue/recovery/session-list behavior and the runtime integrity gate are preserved while stable execution names and project-local output enforcement are added.",
         "",
         "Preserved behavior:",
         "- Standard Mode default; Safe Browser Mode optional/trusted-sites-only.",
         "- Dry-run available but OFF by default.",
         "- Sequential discovery remains bounded, same-domain by default, duplicate-safe, and header plus strict raster validated.",
-        "- Responsive/lazy/JSON-LD/CSS discovery and optional Safe Browser response capture are bounded runtime additions.",
+        "- Responsive/lazy/JSON-LD/CSS discovery and optional Safe Browser response capture are bounded backend additions.",
         "- Validator-gated partial resume, server-aware retry, connectivity-only extra attempts, and adaptive throttle behavior remain internal with no new launcher choice.",
-        "- VPN/IP-change recovery remains runtime-only and concurrent reset requests are coalesced.",
+        "- VPN/IP-change recovery remains backend-only and concurrent reset requests are coalesced.",
         "- Export20 remains capped at 20 files and redacted.",
         "",
         "Rollback:",
         "- Previous confirmed known-good package: ImageDownloader_Full_Build_2026-08-07_1911_CDT_v2175-runtime-identity-integrity-gate.zip (SHA256 02f4c1181788719dc23980263e827f3cec7685c877d75967158fd0fbc998f3f5).",
-        "- If this lean package behaves unexpectedly, run run_diagnose_export.bat and upload the export ZIP before replacing files.",
+        "- If this lean package behaves unexpectedly, run GatewayImageDownloader_DiagnosticsExport.bat and upload exports/IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip before replacing files.",
         "",
         nested_layout_cleanup_summary(root),
         "",
@@ -5581,7 +5688,7 @@ def known_good_state_note(root: Path, config_path: Path) -> str:
 def transfer_brief(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
     lines = [
-        f"{APP_NAME} transfer brief",
+        f"{APP_NAME} support summary",
         f"Generated: {now_local()}",
         f"Current version: {APP_VERSION}",
         f"Current build: {BUILD_NAME}",
@@ -5589,16 +5696,16 @@ def transfer_brief(root: Path, config_path: Path) -> str:
         "",
         "Source of truth:",
         "- Newest verified package should supersede earlier Image Downloader ZIPs unless rollback is explicitly requested.",
-        "- Release package is root-layout and project-folder first; run from a complete extracted folder. IMAGE_DOWNLOADER_BOT_DIR and the legacy C:\\Bots\\ImageDownloader path are accepted only when the required release controls are present.",
+        "- Release package is root-layout and canonical-launcher first; run GatewayImageDownloader.bat from the complete extracted folder. Caller CWD and historical C:\\Bots fallback do not choose the runtime root.",
         "",
         "Why this build exists:",
-        "- v2.17.5 adds a read-only package/version/build and managed-file SHA256 gate before dependency/authenticated/network runtime, with exit 23 on mixed/stale releases and Diagnostics/Export20 still available.",
+        "- The preserved read-only package/version/build and managed-file SHA256 gate runs before dependency/authenticated/network runtime, with exit 23 on mixed/stale releases and Diagnostics/Export20 still available.",
         "- Existing forgiving connectivity retries, debounced/coalesced session renewal, and local AIMD/EWMA throttling remain preserved from the known-good baseline.",
         "- Preserved smart discovery, hidden-media default, validator-gated partial resume, streamed verification, and deterministic failure-isolated Export20.",
         "- Preserved root-layout packaging, reversible old-layout cleanup, path targeting, and the existing quick-start workflow.",
         "",
         "Do not regress:",
-        "- Do not add menu options for runtime reliability fixes.",
+        "- Do not add menu options for backend reliability fixes.",
         "- Keep Standard Mode default, Safe Browser optional/trusted-sites-only, dry-run OFF, and Export20 <= 20 files.",
         "- Do not bundle executables or auto-run downloaded files.",
     ]
@@ -5628,7 +5735,7 @@ def lean_package_audit(root: Path, config_path: Path) -> str:
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
-def project_support_notes(root: Path, config_path: Path) -> str:
+def project_handoff_notes(root: Path, config_path: Path) -> str:
     sections = [
         release_identity_summary(root).rstrip(),
         known_good_state_note(root, config_path).rstrip(),
@@ -5660,7 +5767,7 @@ def launcher_info(root: Path) -> str:
         try:
             text = bat.read_text(encoding="utf-8", errors="replace")
             has_title = bool(re.search(r"(?im)^title\s+Gateway Image Downloader", text))
-            has_echo = "echo Gateway Image Downloader" in text and "echo Using bot folder: %BOT_DIR%" in text
+            has_echo = "echo Gateway Image Downloader" in text and ("echo Using bot folder: %BOT_DIR%" in text or "echo Using bot folder: %~dp0" in text)
             lines.extend([
                 f"File: {bat.name}",
                 f"Size: {bat.stat().st_size} bytes",
@@ -5675,22 +5782,32 @@ def launcher_info(root: Path) -> str:
 
 def path_targeting_summary(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
-    env_name = str(cfg.get("bot_dir_env_override_name") or "IMAGE_DOWNLOADER_BOT_DIR")
-    env_value = os.environ.get(env_name, "")
+    output_mode = str(cfg.get("output_mode", "project_local"))
+    try:
+        effective_output, effective_mode = resolve_download_output(root, cfg)
+        output_note = safe_display_path(effective_output, root if effective_mode == "project_local" else None)
+    except Exception as exc:
+        effective_mode = "blocked"
+        output_note = f"BLOCKED: {exc.__class__.__name__}: {exc}"
     lines = [
         "Path targeting / relocation summary:",
-        f"- Preferred runtime folder: {cfg.get('preferred_bot_dir', '.')}",
+        f"- Execution namespace: {EXECUTION_NAMESPACE}",
+        f"- Canonical entrypoint: {CANONICAL_ENTRYPOINT}",
+        f"- Approved legacy aliases: {', '.join(APPROVED_LEGACY_ENTRYPOINT_ALIASES)}",
         f"- Active project root: {safe_display_path(root)}",
         f"- Config path: {safe_display_path(config_path, root)}",
-        f"- Launcher override variable: {env_name}",
-        f"- Override currently set: {bool(env_value)}",
-        f"- Targeting mode: {cfg.get('path_targeting_mode', 'project_folder_then_valid_env_override_then_legacy_fallback')}",
-        f"- Portable fallback enabled: {bool(cfg.get('portable_fallback_enabled', True))}",
-        "- Launchers do not auto-copy/sync release files; they run the extracted project folder first and only use an override or legacy folder when it contains a complete release.",
-        "- A new install path can be targeted by setting IMAGE_DOWNLOADER_BOT_DIR to a complete project folder before launching; no extra BAT menu option is required.",
+        f"- Targeting mode: {cfg.get('path_targeting_mode', 'canonical_launcher_or_script_root_only')}",
+        "- Canonical launcher/script location is authoritative; caller CWD, Desktop, Downloads, user-profile folders, and C:\\Bots are not implicit runtime roots.",
+        f"- Configured output mode: {output_mode}",
+        f"- Effective output mode: {effective_mode}",
+        f"- Effective downloads: {output_note}",
+        f"- Support exports: {safe_display_path(root / EXPORT_DIRNAME, root)}",
+        f"- Reports: {safe_display_path(root / REPORT_DIRNAME, root)}",
+        f"- State: {safe_display_path(root / STATE_DIRNAME, root)}",
+        f"- Temp: {safe_display_path(root / TEMP_DIRNAME, root)}",
+        "- Relative output paths are blocked if they escape project_root. Absolute output requires output_mode=external_explicit and is visibly reported.",
+        "- Legacy data is not silently moved or deleted during path-targeting verification.",
     ]
-    if env_value:
-        lines.append(f"- Override value (redacted): {safe_display_path(Path(env_value))}")
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
 
@@ -5698,11 +5815,11 @@ def omission_control_coverage_summary(root: Path, config_path: Path) -> str:
     cfg = json_load(config_path, {})
     rows = [
         ("newest_package_baseline", "verified", "Used newest local Image Downloader package as bot baseline unless manifest/changelog evidence conflicts."),
-        ("v2.17.5_parameter_package", "verified", "Uploaded v2.17.5 package was read directly; runtime identity/integrity gate requirements were mapped into release controls, startup ordering, and Export20 evidence."),
-        ("startup_import_config_path", "verified", "Compile/version/self-test/export path-with-spaces checks exercised; launchers now support target override plus portable fallback."),
-        ("conflicts_duplicates_stale_launchers", "verified", "Duplicate filename/hash/function scans run; root-layout ZIP maintained; launchers require complete release controls for overrides/legacy fallback and perform no auto-sync."),
+        ("release_framework", "verified", "The current release framework is reflected in the entrypoint, output, integrity, recovery, and support-evidence controls."),
+        ("startup_import_config_path", "verified", "Compile/version/self-test/export path-with-spaces checks exercised; canonical launcher resolves its own root and legacy launch names are redirects only."),
+        ("conflicts_duplicates_stale_launchers", "verified", "Duplicate filename/hash/function scans run; one canonical execution namespace is authoritative and legacy run_*.bat files contain redirect logic only."),
         ("stability_timeouts_retries_logging_state_shutdown", "verified", "Known-good bounded retries, VPN recovery, log rotation, atomic writes, optional stale-recoverable instance-guard mechanics disabled by default, and graceful cleanup preserved."),
-        ("diagnostics_export20", "verified", "Export is report-only, redacted, allowlisted, integrity-tested, capped, and atomically replaces one easy-to-find project-root support ZIP."),
+        ("diagnostics_export20", "verified", "Export is report-only, redacted, allowlisted, integrity-tested, capped, stages in project temp, and atomically replaces exports/IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip."),
         ("safe_verification", "verified", "Python compile, self-test, diagnose/export, path spaces, export integrity, duplicate scans, and BAT static checks are expected batch checks."),
         ("drive_reference", "found_unchanged", "Structured ImageDownloader vault folders were found; latest-build direct upload may still require manual placement."),
         ("targeted_prime_directive_upgrades", "applied", "Smart Safe Automation now coordinates existing duplicate/resume/reconnect/throttle/sequence features and conservatively follows strong same-domain gallery/pagination links; Safe Browser remains manual trusted-sites-only."),
@@ -5719,14 +5836,14 @@ def omission_control_coverage_summary(root: Path, config_path: Path) -> str:
 
 
 def work_window_triage_exit_summary(root: Path, config_path: Path) -> str:
-    """Human-readable v2.17.5 triage/finalization status for support and Export20."""
+    """Human-readable release triage/finalization status for handoff and Export20."""
     cfg = json_load(config_path, {})
     lines = [
         "Work-window triage / exit status:",
         f"- Critical — runtime identity/integrity gate: {verify_release_identity(root).get('result')}; normal/browser startup is blocked before dependency/authenticated/network runtime unless control identity and every managed hash match.",
         "- Critical — preserved: Windows instance liveness uses a non-signalling process query; PID start signatures protect stale-lock recovery; mutable config/state migration and cleanup occur only after top-level ownership.",
         "- High — completed and verified: adaptive AIMD/EWMA submission control, per-host cooldowns, connectivity-only extra attempts, and coalesced reconnect/session resets are active and regression-tested.",
-        "- Normal — completed and verified: Smart Safe Automation decisions, one canonical support ZIP, v2.17.5-runtime-release-identity-managed-file-integrity-gate asset metadata, manifest/changelog/runbook/batch-output synchronization, path-with-spaces, and lean-package checks.",
+        "- Normal — completed and verified: Smart Safe Automation decisions, one canonical project-local support ZIP, execution/output and runtime-identity metadata, manifest/changelog/runbook synchronization, path-with-spaces, and lean-package checks.",
         "- Optional — deferred by design: automatic Playwright fallback remains disabled because browser execution is a trusted-site decision; broad UI changes, module splitting, services, and additional launchers were not attempted.",
         "- Finalization reserve: protected for compile, self-test, diagnostic/export integrity, duplicate/version scans, relocated-path verification, ZIP/checksum creation, and truthful reporting.",
         "- Completed but not fully verified: native Windows double-click execution, real Norton scanning, and a real Playwright Chromium session require the Windows host and are explicitly listed as limits.",
@@ -5758,7 +5875,7 @@ def transport_discovery_summary(root: Path, config_path: Path) -> str:
     lines = [
         "Smart discovery / transfer stability summary:",
         f"- Smart Safe Automation: mode={cfg.get('automation_mode', 'smart_safe')}; conservative gallery={bool(cfg.get('auto_gallery_follow_enabled', True))}; Safe Browser fallback={cfg.get('auto_browser_fallback_policy', 'manual_trusted_sites_only')}",
-        f"- Canonical support export: {cfg.get('canonical_export_filename', CANONICAL_EXPORT_FILENAME)} in the project root; prior export ZIP retention={cfg.get('export_keep_previous_zips', 0)}",
+        f"- Canonical support export: {cfg.get('canonical_export_filename', CANONICAL_EXPORT_FILENAME)} under project exports/; prior export ZIP retention={cfg.get('export_keep_previous_zips', 0)}",
         f"- Modern HTML discovery enabled: {bool(cfg.get('modern_discovery_enabled', True))}",
         f"- Optional Safe Browser response-image capture enabled: {bool(cfg.get('browser_capture_network_images', True))}",
         f"- Candidate cap/page: {cfg.get('max_candidate_urls_per_page', 500)}; browser response cap/page: {cfg.get('browser_network_image_limit', 500)}",
@@ -5815,7 +5932,7 @@ def duplicate_scan(root: Path) -> str:
     lines.append(f"Scanned files: {len(files)}")
     lines.append(f"Scanned folders: {len(folders)}")
     nested = root / "ImageDownloader"
-    if nested.is_dir() and any((nested / name).exists() for name in [SCRIPT_FILENAME, "run_image_downloader.bat", CONFIG_FILENAME]):
+    if nested.is_dir() and any((nested / name).exists() for name in [SCRIPT_FILENAME, CANONICAL_ENTRYPOINT, CONFIG_FILENAME]):
         lines.append("Nested package folder: CHECK - ImageDownloader/ contains another release copy. This usually means a ZIP was extracted inside the live bot folder.")
         lines.append("Nested package repair: this build archives that nested copy under state/ on launch/export instead of deleting it.")
     else:
@@ -5994,7 +6111,7 @@ def deep_conflict_audit(root: Path, config_path: Path) -> str:
         "- PASS: Safe Browser Mode remains optional/trusted-sites-only with browser context reuse.",
         "- PASS: Sequential discovery remains bounded by same-domain, candidate, failure, anchor, and probe-delay controls.",
         "- PASS: Duplicate URL/content protection remains active while per-run retry friction is reduced.",
-        "- PASS: Network/VPN resilience remains runtime-only through session refresh and bounded retry/backoff.",
+        "- PASS: Network/VPN resilience remains backend-only through session refresh and bounded retry/backoff.",
         "- PASS: Export20 excludes downloads, caches, browser runtimes, and bulky logs.",
         "- FIXED: v2.8 schema metadata and safe migration/backup notes are now part of config/state handling.",
         "- AVAILABLE: The stale-recoverable single-instance guard remains implemented but is disabled by default; independent launches are not rejected by computer identity or ownership rules.",
@@ -6002,7 +6119,7 @@ def deep_conflict_audit(root: Path, config_path: Path) -> str:
         "- FIXED: Run summaries now carry top-level run ID, per-URL run ID, elapsed time, terminal status, schema, network, sequence, and pressure evidence.",
         "- FIXED: v2.9 compact platform/API drift registry is included in diagnostics/export evidence without adding launch-time web crawls or menu options.",
         "- FIXED: v2.16.2 omission-control coverage ledger is generated into diagnostics/export/batch output for broad pass completeness.",
-        "- FIXED: v2.16.2 relocation targeting allows IMAGE_DOWNLOADER_BOT_DIR override while preserving the default installed path and portable fallback.",
+        "- SUPERSEDED: older IMAGE_DOWNLOADER_BOT_DIR/C:\\Bots relocation targeting is replaced by canonical launcher/script root resolution; legacy BAT filenames remain redirects only.",
         "- PRESERVED from v2.16.4: Windows lock liveness uses a non-signalling process query; process creation signatures detect PID reuse without breaking ambiguous live locks.",
         "- FIXED: mutable config/state migration and cleanup now occur only after top-level instance ownership.",
         "- FIXED: completed config migration now publishes the target schema number instead of repeatedly retaining the source schema.",
@@ -6077,7 +6194,7 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         "",
         computer_awareness_summary(root, config_path).rstrip(),
         "",
-        "Current-release / v2.17.5 runtime identity/integrity compliance highlights:",
+        "Release framework and project-local execution highlights:",
         "- Root manifest, changelog, and consolidated runbook remain package artifacts; transfer, known-good/rollback, and health evidence are generated into Export20.",
         "- Diagnostic/export collector includes source/config/launchers/run state/failures/not-downloaded/sequence stats/environment/log summary without bulky caches.",
         "- Redacted system-aware diagnostics include runtime/tooling evidence without raw PC reports or hardware/network identifiers.",
@@ -6086,7 +6203,7 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         f"- Log rotation/bounding enabled: max_bytes={cfg.get('log_max_bytes')}, backups={cfg.get('log_backup_count')}",
         "- No new BAT menu option was added for this compliance pass.",
         "- Helpful computer awareness is included in diagnostics/export as labels and hints only; it cannot block launches, alter state paths, change locks, or restrict features.",
-        "- v2.17.5 runtime identity evidence plus asset-metadata reconciliation, omission-control, triage/exit, and relocation/path-targeting evidence are included in diagnostics/export.",
+        "- Runtime identity evidence plus execution namespace, canonical entrypoint, effective project/output roots, asset reconciliation, omission-control, and triage evidence are included in diagnostics/export.",
         "",
         instance_guard_summary(root, cfg),
         "",
@@ -6105,8 +6222,8 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         "Digital asset metadata:",
         asset_metadata_reconciliation_summary(root, config_path).rstrip(),
         "",
-        "Release archive/reference status:",
-        release_archive_status_summary(root, config_path).rstrip(),
+        "Drive vault/reference status:",
+        drive_vault_status_summary(root, config_path).rstrip(),
         "",
         "Parameter alignment:",
         parameter_alignment_summary(root, config_path).rstrip(),
@@ -6150,7 +6267,7 @@ def diagnostic_report(root: Path, config_path: Path) -> str:
         "- Per-thread HTTP sessions avoid shared-session conflicts during parallel downloads.",
         "- Per-run duplicate queues reset each pasted URL while persistent URL/hash history still prevents re-downloading saved files.",
         "- Export excludes downloaded images, caches, and bulky runtime folders.",
-        "- v2.17.5 runtime identity, structured Drive-vault status, path targeting, omission-control coverage, and custom-input assurance are cached/summarized; no launch-time cloud dependency or documentation crawler was added.",
+        "- execution/output identity, preserved runtime identity, structured Drive-vault status, path targeting, omission-control coverage, and custom-input assurance are cached/summarized; no launch-time cloud dependency was added.",
     ]
     return redact_sensitive_text("\n".join(lines).rstrip() + "\n")
 
@@ -6176,19 +6293,19 @@ def upgrade_review_notes(root: Path, config_path: Path) -> str:
         "",
         "Most recent outside-review decisions:",
         "- Applied now: Smart Safe Automation coordinates direct/page routing, duplicate detection, resume, reconnect, adaptive throttle, numbered sequences, and conservative same-domain gallery pagination without a new menu.",
-        "- Applied now: Export20 atomically replaces one project-root IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip and removes superseded timestamped export ZIPs after successful verification.",
+        "- Applied now: Export20 atomically replaces one project-local exports/IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip and removes superseded timestamped export ZIPs after successful verification.",
         "- Preserved safety boundary: Safe Browser Mode is still a manual trusted-sites-only launcher; no automatic Chromium execution was added.",
         "- Applied now: local adaptive AIMD/EWMA download submission control, per-host Retry-After cooldown, connectivity-only extra attempts, and debounced/coalesced HTTP session renewal.",
         "- Preserved: bounded modern-page discovery, optional browser network-image observation, validator-gated resume, streamed verification, and failure-isolated deterministic Export20.",
-        "- Applied now: v2.17.5-runtime-release-identity-managed-file-integrity-gate canonical release-asset metadata, embedded key-file/container metadata, central downloaded-image metadata records, and read-only reconciliation evidence.",
+        "- Preserved: runtime-release identity/managed-file integrity, canonical release-asset metadata, embedded key-file/container metadata, central downloaded-image metadata records, and read-only reconciliation evidence.",
         "- Preserved: v2.16.4 timer-safe triage/exit, omission-control, path targeting, startup/config validation, conflict/version drift controls, and lean packaging.",
-        "- Applied: Launchers now support IMAGE_DOWNLOADER_BOT_DIR as a runtime target override while preserving C:\\Bots\\ImageDownloader as the default and extracted-folder fallback as recovery.",
+        "- Applied now: GatewayImageDownloader is the stable execution namespace; GatewayImageDownloader.bat is canonical, namespaced helpers select modes, and historical run_*.bat names are thin redirects with no duplicated launch logic.",
         "- Applied: v2.13 export stability pass reuses one diagnostic report for combined diagnose/export runs, hardens atomic writes, and normalizes Drive reference status without adding BAT menu clutter.",
-        "- Applied: v2.13 current-release pass adds structured external release archive governance status and custom-input/config assurance as compact diagnostics/manifest evidence without adding BAT menu clutter.",
+        "- Applied: v2.13 release-framework pass adds structured Drive Project Vault governance status and custom-input/config assurance as compact diagnostics/manifest evidence without adding BAT menu clutter.",
         "- Applied: Best-practices v2.8 compliance pass added timing/run-ID evidence, single-instance guard, config/state schemas, migration backups, queue/backpressure evidence, and deep conflict audit export visibility without adding BAT menu clutter.",
-        "- Applied: Runtime-only VPN/IP-change resilience now resets stale HTTP sessions and optional browser contexts after network failures, with no new menu option.",
+        "- Applied: Backend-only VPN/IP-change resilience now resets stale HTTP sessions and optional browser contexts after network failures, with no new menu option.",
         "- Applied: Safe Browser Mode now reuses one Playwright browser/context per active process instead of launching Chromium for every fetched page.",
-        "- Applied: BAT launchers still prefer C:\\Bots\\ImageDownloader, but fall back to the extraction folder if Windows blocks creating C:\\Bots.",
+        "- SUPERSEDED: historical C:\\Bots and IMAGE_DOWNLOADER_BOT_DIR runtime-root redirection is not used by the canonical canonical launcher; launch the complete extracted project in place.",
         "- Partially applied: Network-heavy paths now catch request/IO/runtime errors more specifically; top-level guards still protect the interactive flow from crashing.",
         "- Deferred: Splitting the single Python file into many modules was not applied in this build because the current priority is a lean, portable, easy-transfer package with a small file count.",
         "",
@@ -6220,18 +6337,18 @@ def project_health_review(root: Path, config_path: Path) -> str:
         f"Build date: {BUILD_DATE}",
         "",
         "Deep-review outcome:",
-        "- PASS: Current v2.17.5-runtime-release-identity-managed-file-integrity-gate parameters govern this Smart Safe Automation/canonical-export pass; known-good discovery, validation, hidden-media, state, timeout, and reconnect behavior remains preserved.",
-        "- PASS: Standard Mode remains the fast default path and Smart Safe Automation selects only bounded low-risk runtime helpers.",
+        "- PASS: The current public release framework governs this maintenance pass; known-good queue, discovery, validation, hidden-media, state, timeout, and reconnect behavior remains preserved.",
+        "- PASS: Standard Mode remains the fast default path and Smart Safe Automation selects only bounded low-risk backend helpers.",
         "- PASS: Safe Browser Mode remains optional/trusted-sites-only and reuses its browser context.",
         "- PASS: Sequential discovery remains bounded by same-domain, max candidates, max failures, and duplicate URL/content guards.",
         "- PASS: Export excludes downloaded images, caches, Playwright runtimes, and bulky state.",
         "- PASS: No bundled executables or hidden downloaded-file execution paths are part of the package.",
         "- PASS: Completed image files use the native Windows Hidden attribute by default; project/output folders stay visible and downloaded files are never executed.",
-        "- PASS: v2.17.5-runtime-release-identity-managed-file-integrity-gate metadata evidence remains lean: MANIFEST.json is canonical, DRIVE_UPLOAD_MANIFEST.csv is the merged CSV/Drive view, key assets carry embedded/header metadata, and Export20 carries adaptive/reconnect reconciliation evidence without a new sidecar file.",
+        "- PASS: Execution/output and runtime-identity metadata remain lean: MANIFEST.json is canonical, DRIVE_UPLOAD_MANIFEST.csv is the merged CSV/Drive view, and Export20 carries execution/output identity without a new sidecar stack.",
         "- PASS: Incremental submission and local adaptive concurrency prevent eager executor flooding while preserving the configured worker ceiling.",
         "- PASS: HTTP 429/5xx/network/slow-response pressure lowers the active limit; healthy completions restore it additively.",
         "- PASS: VPN/IP/session resets are debounced so concurrent workers do not trigger repeated generation churn.",
-        "- PASS: Export20 now builds a deterministic allowlisted plan, snapshots changing files, isolates collector failures, records omissions/hashes, excludes recursive archives, remains capped at 20 files, and publishes one canonical project-root ZIP.",
+        "- PASS: Export20 now builds a deterministic allowlisted plan, snapshots changing files, isolates collector failures, records omissions/hashes, excludes recursive archives, remains capped at 20 files, and publishes one canonical project-local exports ZIP.",
         "- FIXED: Combined --diagnose --export-support runs now reuse one diagnostic report instead of creating duplicate report files.",
         "- FIXED: Config/state/report atomic writes now use unique temporary filenames before replace to reduce cross-process collision risk.",
         "- FIXED: Drive reference-check config now uses a valid compact status plus a separate note, preventing startup normalization from downgrading verified folder evidence.",
@@ -6243,15 +6360,15 @@ def project_health_review(root: Path, config_path: Path) -> str:
         "- FIXED: Candidate/backpressure limits are explicit and exported.",
         "",
         "Layer map:",
-        "1. BAT launcher layer: resolve a complete project folder/explicit override/legacy fallback, find Python, run the v2.17.5 identity gate, then install bounded dependencies only after PASS.",
+        "1. BAT launcher layer: GatewayImageDownloader.bat resolves its own project folder, finds Python, runs the release identity gate, then installs bounded dependencies only after PASS; namespaced helpers and legacy redirects contain no duplicated backend logic.",
         "2. CLI/session layer: keep mode flags and interactive loop isolated from download logic.",
         "3. Network layer: separate connect/read timeouts, monotonic caps, Retry-After/backoff, coalesced VPN/IP session refresh, connectivity-only extra retries, validator-gated Range resume, thread-local sessions, and local adaptive concurrency feedback.",
         "4. Parser/discovery layer: HTML attributes, responsive srcsets/imagesrcset, metadata, JSON-LD, CSS, noscript, optional browser response capture, gallery candidates, and sequential seeds.",
         "5. Validation/download layer: dangerous extension/content blocking, image magic checks, streamed Pillow/pixel verification, max-size checks, URL/SHA256/visual/library duplicate detection, hidden-media attribute, and atomic target writes.",
         "6. Operational integrity layer: instance ownership, config/state schema migration, bounded candidate pressure, run IDs, elapsed timing, and graceful cleanup.",
-        "7. Diagnostics/export layer: current config, automation decisions, build/version, run summaries, failures, sequence stats, logs, launcher info, deep conflict audit, and one canonical support ZIP.",
+        "7. Diagnostics/export layer: current config, automation decisions, build/version, run summaries, failures, sequence stats, logs, launcher info, deep conflict audit, and one canonical support package.",
         "",
-        "System-aware v2.17.5-runtime-release-identity-managed-file-integrity-gate posture:",
+        "System-aware canonical-entrypoint and project-local-output posture:",
         "- Redacted system/runtime summary is included in diagnostics/export without raw PC reports.",
         "- Usernames/home paths, query-token values, and obvious secret keys are redacted in generated export evidence.",
         "- Log rotation keeps runtime logs bounded by config instead of growing indefinitely.",
@@ -6355,16 +6472,18 @@ def export_for_support(root: Path, config_path: Path, report_path: Optional[Path
         cfg_snapshot_meta = {"status": "unreadable"}
 
     export_dir = root / EXPORT_DIRNAME
+    temp_dir = root / TEMP_DIRNAME
     export_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir.mkdir(parents=True, exist_ok=True)
     canonical_name = Path(str(cfg.get("canonical_export_filename", CANONICAL_EXPORT_FILENAME))).name or CANONICAL_EXPORT_FILENAME
-    export_path = root / canonical_name
-    for stale_tmp in list(export_dir.glob(".image_downloader_support_export_*.tmp")) + list(root.glob(f".{canonical_name}.*.tmp")):
+    export_path = export_dir / canonical_name
+    for stale_tmp in temp_dir.glob(f".{canonical_name}.*.tmp"):
         with contextlib.suppress(OSError):
             if stale_tmp.stat().st_mtime < time.time() - 86400:
                 stale_tmp.unlink()
 
     stamp = timestamp_unique()
-    tmp_path = root / f".{canonical_name}.{uuid.uuid4().hex[:8]}.tmp"
+    tmp_path = temp_dir / f".{canonical_name}.{uuid.uuid4().hex[:8]}.tmp"
     collected: List[Dict[str, Any]] = []
     outcomes: List[Dict[str, Any]] = []
     omitted: List[Dict[str, Any]] = []
@@ -6473,9 +6592,9 @@ def export_for_support(root: Path, config_path: Path, report_path: Optional[Path
 
     static_specs = [
         ("static.source", SCRIPT_FILENAME, True),
-        ("static.launcher.standard", "run_image_downloader.bat", True),
-        ("static.launcher.browser", "run_image_downloader_safe_browser.bat", True),
-        ("static.launcher.export", "run_diagnose_export.bat", True),
+        ("static.launcher.standard", CANONICAL_ENTRYPOINT, True),
+        ("static.launcher.browser", SAFE_BROWSER_ENTRYPOINT, True),
+        ("static.launcher.export", DIAGNOSTICS_EXPORT_ENTRYPOINT, True),
         ("static.runbook", "README_QUICK_START.md", True),
         ("static.changelog", "CHANGELOG.md", True),
         ("static.version", VERSION_FILENAME, True),
@@ -6500,8 +6619,8 @@ def export_for_support(root: Path, config_path: Path, report_path: Optional[Path
         ("generated.diagnostic", "diagnostic_report.txt", True, diagnostic_collector),
         ("generated.environment", "dependency_environment_summary.txt", True, lambda: dependency_environment_summary(root, config_path)),
         ("generated.audit", "deep_conflict_audit.txt", True, lambda: deep_conflict_audit(root, config_path)),
-        ("generated.support", "project_support_notes.txt", True, lambda: project_support_notes(root, config_path)),
-        ("generated.alignment", "current_parameter_alignment_status.txt", True, lambda: release_identity_summary(root) + "\n" + parameter_alignment_summary(root, config_path) + "\n" + duplicate_detection_summary(root, config_path) + "\n" + asset_metadata_reconciliation_summary(root, config_path) + "\n" + work_window_triage_exit_summary(root, config_path) + "\n" + release_archive_status_summary(root, config_path) + "\n" + path_targeting_summary(root, config_path) + "\n" + omission_control_coverage_summary(root, config_path) + "\n" + config_input_assurance_summary(root, config_path) + "\n" + transport_discovery_summary(root, config_path)),
+        ("generated.handoff", "project_handoff_notes.txt", True, lambda: project_handoff_notes(root, config_path)),
+        ("generated.alignment", "current_parameter_alignment_status.txt", True, lambda: release_identity_summary(root) + "\n" + parameter_alignment_summary(root, config_path) + "\n" + duplicate_detection_summary(root, config_path) + "\n" + asset_metadata_reconciliation_summary(root, config_path) + "\n" + work_window_triage_exit_summary(root, config_path) + "\n" + drive_vault_status_summary(root, config_path) + "\n" + path_targeting_summary(root, config_path) + "\n" + omission_control_coverage_summary(root, config_path) + "\n" + config_input_assurance_summary(root, config_path) + "\n" + transport_discovery_summary(root, config_path)),
         ("generated.logs", "logs_summary.txt", False, lambda: logs_summary(root, safe_int(cfg.get("log_tail_lines_for_export", 400), 400, min_value=20, max_value=2000))),
         ("generated.recent_run", "recent_run_summary.json", True, lambda: state_json_text(RECENT_RUN_FILENAME, {})),
         ("generated.failures", "recent_failures_errors.json", True, lambda: state_json_text(RECENT_FAILURES_FILENAME, [])),
@@ -6531,7 +6650,7 @@ def export_for_support(root: Path, config_path: Path, report_path: Optional[Path
             "asset_id": "IMGDL-EXPORT-ENTRY-" + hashlib.sha256(item["arcname"].encode("utf-8")).hexdigest()[:16].upper(),
             "path": item["arcname"],
             "title": Path(item["arcname"]).name,
-            "purpose": "support diagnostic/support evidence",
+            "purpose": "support diagnostic package",
             "asset_class": "diagnostic",
             "role": "export-evidence",
             "format": Path(item["arcname"]).suffix.lower().lstrip(".") or "txt",
@@ -6539,7 +6658,7 @@ def export_for_support(root: Path, config_path: Path, report_path: Optional[Path
             "version": APP_VERSION,
             "status": ASSET_STATUS,
             "sensitivity": ASSET_SENSITIVITY,
-            "source_of_truth": item["arcname"] in {"MANIFEST.json", "project_support_notes.txt", "diagnostic_report.txt"},
+            "source_of_truth": item["arcname"] in {"MANIFEST.json", "project_handoff_notes.txt", "diagnostic_report.txt"},
             "tags": ["image-downloader", "export20", "diagnostic-evidence"],
             "aliases": [Path(item["arcname"]).stem],
             "lineage": "generated from cached/read-only project evidence",
@@ -6580,8 +6699,8 @@ def export_for_support(root: Path, config_path: Path, report_path: Optional[Path
         "project_slug": PROJECT_SLUG,
         "status": ASSET_STATUS,
         "sensitivity": ASSET_SENSITIVITY,
-        "tags": ["image-downloader", "export20", "support-support", "asset-metadata"],
-        "aliases": ["Image Downloader support export", "diagnostic support"],
+        "tags": ["image-downloader", "export20", "support-handoff", "asset-metadata"],
+        "aliases": ["Image Downloader support export", "diagnostic handoff"],
         "lineage": f"generated by {PACKAGE_ASSET_ID}@{APP_VERSION}",
         "assets": export_assets,
         "app": APP_NAME,
@@ -6589,7 +6708,7 @@ def export_for_support(root: Path, config_path: Path, report_path: Optional[Path
         "build": BUILD_NAME,
         "build_date": BUILD_DATE,
         "created_at": now_local(),
-        "canonical_output_path": export_path.name,
+        "canonical_output_path": f"{EXPORT_DIRNAME}/{export_path.name}",
         "single_easy_find_zip": True,
         "previous_export_zip_retention": safe_int(cfg.get("export_keep_previous_zips", 0), 0, min_value=0, max_value=5),
         "file_limit": EXPORT_FILE_LIMIT,
@@ -6616,7 +6735,7 @@ def export_for_support(root: Path, config_path: Path, report_path: Optional[Path
             "resumable_transfers": "validator-gated Range/If-Range partial resume with bounded retention and restart-on-drift",
             "streamed_validation": "download stream is verified from disk with Pillow/pixel guards and hashed/copied without loading the full file into RAM",
             "smart_safe_automation": "standard-first routing, duplicate/resume/reconnect/throttle/sequence automation, and conservative same-domain gallery pagination; Safe Browser remains manual trusted-sites-only",
-            "canonical_export": "one atomically replaced project-root ZIP named IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip",
+            "canonical_export": "one atomically replaced project-local exports/IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip staged under project temp and integrity-tested before finalize",
         },
         "excluded_by_design": [
             "downloaded images",
@@ -6659,7 +6778,6 @@ def export_for_support(root: Path, config_path: Path, report_path: Optional[Path
         keep_previous = safe_int(cfg.get("export_keep_previous_zips", 0), 0, min_value=0, max_value=5)
         prior_exports: List[Path] = []
         prior_exports.extend(export_dir.glob("image_downloader_support_export_*.zip"))
-        prior_exports.extend(path for path in root.glob("IMAGE_DOWNLOADER_SUPPORT_EXPORT*.zip") if path.resolve() != export_path.resolve())
         prior_exports = sorted({path.resolve() for path in prior_exports if path.exists()}, key=lambda path: path.stat().st_mtime, reverse=True)
         for old_export in prior_exports[keep_previous:]:
             with contextlib.suppress(OSError):
@@ -6676,6 +6794,10 @@ def interactive_loop(downloader: ImageDownloader) -> None:
         ctx = downloader.computer_context
         print(f"Active computer: {ctx.get('display_name')} [{ctx.get('diagnostic_id')}]")
         print("Computer identification is informational only and never blocks launch or changes feature access.")
+    print(f"Execution: {EXECUTION_NAMESPACE} via {CANONICAL_ENTRYPOINT}")
+    print(f"Project root: {downloader.root}")
+    print(f"Effective downloads: {downloader.output_dir} [{downloader.output_mode}]")
+    print(f"Support exports: {downloader.export_dir}")
     print("Quick Start:")
     print("- Paste a page or image URL and press Enter")
     print("- Queue capacity is 100 URLs; no more than 3 image downloads run at once")
@@ -6720,8 +6842,8 @@ def interactive_loop(downloader: ImageDownloader) -> None:
             continue
         if command == "/export":
             path = export_for_support(downloader.root, downloader.config_path)
-            print(f"Support export ZIP created: {path}")
-            print("Attach this file to a support request if needed.")
+            print(f"support export ZIP created: {path}")
+            print("Share this file with authorized support personnel.")
             continue
         if command in {"/dry-run", "/dryrun"}:
             downloader.config["dry_run"] = not bool(downloader.config.get("dry_run", False))
@@ -6773,12 +6895,17 @@ def interactive_loop(downloader: ImageDownloader) -> None:
 
 
 def run_release_identity_gate_self_test() -> Tuple[bool, str]:
-    test_root = Path(tempfile.mkdtemp(prefix="image_downloader_identity_gate_"))
+    test_temp_parent = app_root() / TEMP_DIRNAME
+    test_temp_parent.mkdir(parents=True, exist_ok=True)
+    test_root = Path(tempfile.mkdtemp(prefix="image_downloader_identity_gate_", dir=str(test_temp_parent)))
     try:
         managed_names = [
             SCRIPT_FILENAME,
             VERSION_FILENAME,
             PACKAGE_METADATA_FILENAME,
+            CANONICAL_ENTRYPOINT,
+            SAFE_BROWSER_ENTRYPOINT,
+            DIAGNOSTICS_EXPORT_ENTRYPOINT,
             "run_image_downloader.bat",
             "run_image_downloader_safe_browser.bat",
             "run_diagnose_export.bat",
@@ -6794,6 +6921,10 @@ def run_release_identity_gate_self_test() -> Tuple[bool, str]:
             "package_id": PACKAGE_ID,
             "version": APP_VERSION,
             "build_id": BUILD_NAME,
+            "execution_namespace": EXECUTION_NAMESPACE,
+            "canonical_entrypoint": CANONICAL_ENTRYPOINT,
+            "backend_target": SCRIPT_FILENAME,
+            "project_output_roots": PROJECT_OUTPUT_ROOTS,
             "gate": RUNTIME_IDENTITY_GATE_VERSION,
         }
         (test_root / PACKAGE_METADATA_FILENAME).write_text(json.dumps(package_meta, indent=2) + "\n", encoding="utf-8")
@@ -6814,6 +6945,10 @@ def run_release_identity_gate_self_test() -> Tuple[bool, str]:
                 "package_id": PACKAGE_ID,
                 "version": APP_VERSION,
                 "build_id": BUILD_NAME,
+                "execution_namespace": EXECUTION_NAMESPACE,
+                "canonical_entrypoint": CANONICAL_ENTRYPOINT,
+                "backend_target": SCRIPT_FILENAME,
+                "project_output_roots": PROJECT_OUTPUT_ROOTS,
                 "files": entries,
             }
             (test_root / MANIFEST_FILENAME).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -6859,7 +6994,9 @@ def run_self_test() -> int:
         print(f"Self-test failed: runtime identity gate: {gate_note}")
         return 1
     print(f"Runtime identity gate synthetic tests: {gate_note}")
-    parent = Path(tempfile.mkdtemp(prefix="image_downloader_selftest_"))
+    test_temp_parent = app_root() / TEMP_DIRNAME
+    test_temp_parent.mkdir(parents=True, exist_ok=True)
+    parent = Path(tempfile.mkdtemp(prefix="image_downloader_selftest_", dir=str(test_temp_parent)))
     root = parent / "Image Downloader self test with spaces"
     root.mkdir(parents=True, exist_ok=True)
     httpd: Optional[ThreadingHTTPServer] = None
@@ -7237,12 +7374,15 @@ def run_self_test() -> int:
             server_stopped = True
         export_path = export_for_support(root, config_path)
         second_export = export_for_support(root, config_path)
-        if export_path != second_export or export_path.name != CANONICAL_EXPORT_FILENAME:
-            print("Self-test failed: export did not use one canonical easy-to-find ZIP path.")
+        if export_path != second_export or export_path.name != CANONICAL_EXPORT_FILENAME or export_path.parent != (root / EXPORT_DIRNAME):
+            print("Self-test failed: export did not use the canonical project-local exports ZIP path.")
             return 1
-        export_zip_candidates = list(root.glob("IMAGE_DOWNLOADER_SUPPORT_EXPORT*.zip")) + list((root / EXPORT_DIRNAME).glob("image_downloader_support_export_*.zip"))
+        export_zip_candidates = list((root / EXPORT_DIRNAME).glob("IMAGE_DOWNLOADER_SUPPORT_EXPORT*.zip")) + list((root / EXPORT_DIRNAME).glob("image_downloader_support_export_*.zip"))
         if len(export_zip_candidates) != 1:
-            print(f"Self-test failed: expected one support ZIP, found {len(export_zip_candidates)}.")
+            print(f"Self-test failed: expected one support ZIP under exports, found {len(export_zip_candidates)}.")
+            return 1
+        if list(root.glob("IMAGE_DOWNLOADER_SUPPORT_EXPORT*.zip")):
+            print("Self-test failed: Export20 published a ZIP in the project root instead of exports/.")
             return 1
         for candidate_export in (export_path, second_export):
             with zipfile.ZipFile(candidate_export, "r") as zf:
@@ -7266,7 +7406,7 @@ def run_self_test() -> int:
             if candidate_export.name in names or any(name.lower().endswith(".zip") for name in names):
                 print("Self-test failed: export recursively included an archive.")
                 return 1
-            for required_name in ["diagnostic_report.txt", "project_support_notes.txt", "recent_failures_errors.json", "current_parameter_alignment_status.txt"]:
+            for required_name in ["diagnostic_report.txt", "project_handoff_notes.txt", "recent_failures_errors.json", "current_parameter_alignment_status.txt"]:
                 if required_name not in names:
                     print(f"Self-test failed: export missing {required_name}.")
                     return 1
@@ -7275,7 +7415,7 @@ def run_self_test() -> int:
         for heading in [
             "Smart discovery / transfer stability summary",
             "Platform/API compliance and drift snapshot",
-            "Optional external archive status",
+            "Google Drive vault/reference status",
             "Custom-input / config assurance snapshot",
             "Digital asset metadata reconciliation",
             "Helpful computer awareness (non-restrictive)",
@@ -7299,6 +7439,21 @@ def run_self_test() -> int:
             return 1
         if downloader.adaptive_throttle.snapshot().get("max_observed_in_flight", 0) > MAX_ACTIVE_DOWNLOADS:
             print("Self-test failed: observed active downloads exceeded the hard cap of three.")
+            return 1
+        local_output, local_mode = resolve_download_output(root, {"output": "downloads", "output_mode": "project_local"})
+        if local_mode != "project_local" or not _path_is_within(local_output, root):
+            print("Self-test failed: project-local output did not stay under the project root.")
+            return 1
+        try:
+            resolve_download_output(root, {"output": "../escape", "output_mode": "project_local"})
+            print("Self-test failed: escaping relative output path was not blocked.")
+            return 1
+        except RuntimeError:
+            pass
+        external_fixture = (root.parent / "explicit external output").resolve()
+        resolved_external, external_mode = resolve_download_output(root, {"output": str(external_fixture), "output_mode": "external_explicit"})
+        if external_mode != "external_explicit" or resolved_external != external_fixture:
+            print("Self-test failed: explicit external output resolution failed.")
             return 1
         queue_test = downloader.enqueue_download_urls([f"http://127.0.0.1:{port}/queued_{i}.png" for i in range(DOWNLOAD_QUEUE_HARD_MAX + 1)], source="self-test")
         if len(queue_test.get("accepted", [])) != DOWNLOAD_QUEUE_HARD_MAX or len(queue_test.get("rejected", [])) != 1:
@@ -7332,7 +7487,7 @@ def run_self_test() -> int:
             "Self-test passed: startup/config/path-with-spaces, modern responsive/lazy/JSON-LD/CSS discovery, "
             "bounded sequential probing, server-aware Retry-After, adaptive AIMD/EWMA throttling, coalesced reconnect/session renewal, validator-gated partial resume, streamed strict image verification, "
             "non-signalling process identity, optional instance-lock mechanics, lock-before-migration test ordering, schema/state checkpoints, VPN/IP recovery hooks, graceful bounded worker controls, "
-            "v2.17.5 runtime release identity/hash gate, redacted failure-isolated offline Export20, credential-safe URL evidence, Windows-reserved filename neutralization, nonrestrictive helpful computer labeling, one canonical easy-to-find support ZIP, persistent 100-item queue autosave/crash recovery, a hard three-active-download ceiling, timestamped session download-list TXT output, Smart Safe Automation with conservative same-domain gallery pagination, strict five-second per-image download timeout, URL/SHA256/visual/library duplicate autodetection, canonical asset metadata reconciliation, content-addressed downloaded-image metadata, embedded ZIP metadata, atomic ZIP finalization, and recursive-export prevention are working."
+            "runtime release identity/hash gate, redacted failure-isolated offline Export20, credential-safe URL evidence, Windows-reserved filename neutralization, nonrestrictive helpful computer labeling, one canonical easy-to-find support ZIP, persistent 100-item queue autosave/crash recovery, a hard three-active-download ceiling, timestamped session download-list TXT output, Smart Safe Automation with conservative same-domain gallery pagination, strict five-second per-image download timeout, URL/SHA256/visual/library duplicate autodetection, canonical asset metadata reconciliation, content-addressed downloaded-image metadata, embedded ZIP metadata, atomic ZIP finalization, and recursive-export prevention are working."
         )
         return 0
     except Exception:
@@ -7356,9 +7511,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--browser-mode", action="store_true", help="Use optional Safe Browser Mode for trusted sites only")
     parser.add_argument("--dry-run", action="store_true", help="Preview candidates without saving files")
     parser.add_argument("--diagnose", action="store_true", help="Write an extensive diagnostic report")
-    parser.add_argument("--export-support", action="store_true", help="Create a redacted support ZIP with no more than 20 files")
+    parser.add_argument("--export-support", action="store_true", help="Create a <=20-file support ZIP")
     parser.add_argument("--self-test", action="store_true", help="Run local sanity checks")
-    parser.add_argument("--verify-release", action="store_true", help="Verify v2.17.5 release identity and every package-managed file, then exit")
+    parser.add_argument("--verify-release", action="store_true", help="Verify release identity and every package-managed file, then exit")
     parser.add_argument("--version", action="store_true", help="Show version and exit")
     return parser.parse_args(argv)
 
@@ -7369,7 +7524,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"{APP_NAME} {APP_VERSION} ({BUILD_NAME}, {BUILD_DATE})")
         return 0
     root = app_root()
-    # v2.17.5 ordering: safe local root/log setup, then read-only identity/hash gate,
+    # Release ordering: canonical root/log setup, then read-only identity/hash gate,
     # before dependency installs, credentials, browser startup, or download/network activity.
     (root / LOG_DIRNAME).mkdir(parents=True, exist_ok=True)
     gate_evidence = verify_release_identity(root)
@@ -7394,15 +7549,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 print(f"Diagnostic report created: {diagnostic_path}")
             if args.export_support:
                 path = export_for_support(root, config_path, diagnostic_path)
-                print(f"Support export ZIP created: {path}")
-                print("Attach this file to a support request if needed.")
+                print(f"support export ZIP created: {path}")
+                print("Share this file with authorized support personnel.")
             return 0
         except Exception as exc:
             print(f"Diagnostic/export error: {exc}")
             return 1
     if gate_evidence.get("result") != "PASS":
         print_release_identity_result(gate_evidence)
-        print("Startup blocked before dependency or network activity. Run run_diagnose_export.bat for a redacted support export, or restore the full verified release ZIP.")
+        print("Startup blocked before dependency/authenticated/network runtime. Run GatewayImageDownloader_DiagnosticsExport.bat for a Support Export20, or restore the full verified release ZIP.")
         return RELEASE_IDENTITY_EXIT_CODE
     browser_override: Optional[bool] = None
     if args.browser_mode:

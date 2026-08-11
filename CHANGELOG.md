@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026.08.09.1
+
+- Added `GatewayImageDownloader.bat` as the stable Windows entrypoint, with separate safe-browser and diagnostics helpers.
+- Kept the established `run_*.bat` names as thin redirects so existing shortcuts continue to work.
+- Made `downloads`, `logs`, `state`, `temp`, `reports`, and `exports` project-local by default; an external download folder now requires an explicit validated setting.
+- Extended the pre-network release check to cover the execution namespace, canonical launcher, backend target, output roots, and every managed file.
+- Preserved queue autosave and recovery, the 100-item capacity, the three-download ceiling, duplicate controls, and timestamped session lists.
+- Renamed the public diagnostic artifact to `IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip` and kept operational queue URLs out of that package.
+- Verified the source build on Windows before promotion; this public package is independently rechecked by repository CI.
+
 ## 2026.08.08.1
 
 - Adds a persistent queue with automatic save and recovery, bounded to 100 items.

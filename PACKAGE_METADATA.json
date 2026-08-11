@@ -4,26 +4,45 @@
   "package_asset_id": "IMGDL-PACKAGE",
   "application": "Gateway Image Downloader",
   "project_slug": "image-downloader",
-  "version": "2026.08.08.1",
-  "build_id": "v2175-queue-autosave-recovery-3worker-session-list",
-  "build_date": "2026-08-08",
+  "version": "2026.08.09.1",
+  "build_id": "v2176-canonical-entrypoint-project-local-outputs",
+  "build_date": "2026-08-09",
+  "public_package_date": "2026-08-11",
   "status": "current-public-source",
   "publisher": "Gateway Information Group LLC",
+  "execution_namespace": "GatewayImageDownloader",
+  "canonical_entrypoint": "GatewayImageDownloader.bat",
+  "backend_target": "image_downloader.py",
+  "approved_aliases": [
+    "run_image_downloader.bat",
+    "run_image_downloader_safe_browser.bat",
+    "run_diagnose_export.bat"
+  ],
+  "project_output_roots": {
+    "config_file": "image_downloader_config.json",
+    "downloads": "downloads",
+    "logs": "logs",
+    "state": "state",
+    "temp": "temp",
+    "reports": "reports",
+    "exports": "exports",
+    "backups": "state/migration_backups"
+  },
   "runtime_identity_gate": {
     "required": true,
     "gate_version": "runtime-release-identity-v1",
     "block_exit_code": 23,
-    "required_controls": [
-      "VERSION.txt",
-      "MANIFEST.json",
-      "PACKAGE_METADATA.json"
-    ],
+    "required_controls": ["VERSION.txt", "MANIFEST.json", "PACKAGE_METADATA.json"],
     "managed_inventory_source": "MANIFEST.json files where package_managed=true",
-    "managed_file_count_expected": 13,
+    "managed_file_count_expected": 16,
     "checks": [
       "package_id",
       "version",
       "build_id",
+      "execution_namespace",
+      "canonical_entrypoint",
+      "backend_target",
+      "project_output_roots",
       "root-contained unique paths",
       "presence",
       "size",
@@ -39,11 +58,7 @@
     "session_download_list_latest": "reports/LATEST_DOWNLOAD_LIST.txt",
     "operational_state_is_local_private": true
   },
-  "launchers": {
-    "primary": "run_image_downloader.bat",
-    "safe_browser": "run_image_downloader_safe_browser.bat",
-    "diagnostics_export": "run_diagnose_export.bat"
-  },
+  "support_export": "exports/IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip",
   "runtime": {
     "python_min": "3.11",
     "compiled_binaries": false,

@@ -1,175 +1,20 @@
 @echo off
-rem Asset ID: IMGDL-LAUNCHER-STANDARD
-rem Version: 2026.08.08.1
-rem Build: v2175-queue-autosave-recovery-3worker-session-list
-rem Status: current
-rem Sensitivity: public-source
-rem Tags: image-downloader,launcher,standard-mode,windows,portable,asset-metadata
+rem Asset ID: IMGDL-LEGACY-ALIAS-STANDARD
+rem Version: 2026.08.09.1
+rem Build: v2176-canonical-entrypoint-project-local-outputs
+rem Status: compatibility-redirect
 rem Copyright © 2026 Gateway Information Group LLC. All rights reserved.
 setlocal EnableExtensions
-
-set "SCRIPT_NAME=image_downloader.py"
-set "SOURCE_DIR=%~dp0"
-for %%I in ("%SOURCE_DIR%.") do set "SOURCE_DIR_NOSLASH=%%~fI"
-set "BOT_DIR=%SOURCE_DIR_NOSLASH%"
-set "BOT_DIR_SOURCE=project folder"
-set "ENV_BOT_DIR=%IMAGE_DOWNLOADER_BOT_DIR%"
-set "EXIT_CODE=0"
-
-if defined ENV_BOT_DIR call :consider_override
-title Gateway Image Downloader
+title Gateway Image Downloader Legacy Launcher Redirect
 echo =========================================
-echo Gateway Image Downloader
+echo Gateway Image Downloader Legacy Redirect
 echo =========================================
-echo Using bot folder: %BOT_DIR%
-echo Version: 2026.08.08.1
-echo Build: v2175-queue-autosave-recovery-3worker-session-list
+echo Using bot folder: %~dp0
+echo Redirecting run_image_downloader.bat to GatewayImageDownloader.bat
 echo.
-echo Started: %DATE% %TIME%
-echo Target source: %BOT_DIR_SOURCE%
-echo Launch mode: portable project-folder first; no automatic copy or stale installed-folder sync.
-echo.
-
-if not exist "%BOT_DIR%\%SCRIPT_NAME%" (
-    echo Missing %SCRIPT_NAME%.
-    echo Extract the complete ZIP and run this BAT from the extracted project folder.
-    echo.
-    set "EXIT_CODE=1"
-    goto :end
-)
-
-call :verify_write_dir "%BOT_DIR%"
-if errorlevel 1 (
-    echo The bot folder is not writable: %BOT_DIR%
-    echo Move or extract the package to a normal writable folder and try again.
-    echo.
-    set "EXIT_CODE=1"
-    goto :end
-)
-
-cd /d "%BOT_DIR%"
-if errorlevel 1 (
-    echo Could not enter bot folder: %BOT_DIR%
-    echo.
-    set "EXIT_CODE=1"
-    goto :end
-)
-
-call :find_python
-if errorlevel 1 (
-    set "EXIT_CODE=1"
-    goto :end
-)
-call :verify_release_integrity
-if errorlevel 1 (
-    set "EXIT_CODE=23"
-    goto :end
-)
-
-call :ensure_core_dependencies
-if errorlevel 1 (
-    set "EXIT_CODE=1"
-    goto :end
-)
-
-echo Quick Start:
-echo - Paste a page or image URL and press Enter
-echo - Press Enter on a blank line to exit
-echo - Type /export to create a redacted support ZIP
-echo - Type /config to see the config file path
-echo - Optional: set IMAGE_DOWNLOADER_BOT_DIR to another complete project folder
-echo - Smart Safe Automation handles duplicates, resume, reconnect, adaptive throttle, sequences, and conservative gallery pages
-echo - Computer auto-labeling is diagnostic-only and never blocks launch or changes paths/features
-echo.
-%PY_CMD% "%BOT_DIR%\%SCRIPT_NAME%" --standard %*
+set "GID_LAUNCH_MODE=standard"
+set "GID_SHIM_BANNER_SHOWN=1"
+set "GID_LEGACY_ALIAS=run_image_downloader.bat"
+call "%~dp0GatewayImageDownloader.bat" %*
 set "EXIT_CODE=%ERRORLEVEL%"
-goto :end
-
-:consider_override
-set "ENV_BOT_DIR=%ENV_BOT_DIR:"=%"
-for %%I in ("%ENV_BOT_DIR%") do set "ENV_BOT_DIR=%%~fI"
-if exist "%ENV_BOT_DIR%\%SCRIPT_NAME%" if exist "%ENV_BOT_DIR%\VERSION.txt" if exist "%ENV_BOT_DIR%\MANIFEST.json" if exist "%ENV_BOT_DIR%\PACKAGE_METADATA.json" (
-    set "BOT_DIR=%ENV_BOT_DIR%"
-    set "BOT_DIR_SOURCE=IMAGE_DOWNLOADER_BOT_DIR override (complete release controls present)"
-) else (
-    echo Notice: IMAGE_DOWNLOADER_BOT_DIR is incomplete or missing required release controls.
-    echo Required: %SCRIPT_NAME%, VERSION.txt, MANIFEST.json, PACKAGE_METADATA.json.
-    echo Using the project folder instead.
-    echo.
-)
-goto :eof
-
-:verify_write_dir
-set "TEST_FILE=%~1\.launcher_write_test_%RANDOM%.tmp"
-> "%TEST_FILE%" echo ok
-if errorlevel 1 exit /b 1
-del "%TEST_FILE%" >nul 2>nul
-exit /b 0
-
-:find_python
-where py >nul 2>nul
-if not errorlevel 1 (
-    py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,9) else 1)" >nul 2>nul
-    if not errorlevel 1 (
-        set "PY_CMD=py -3"
-        goto :eof
-    )
-)
-where python >nul 2>nul
-if not errorlevel 1 (
-    python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,9) else 1)" >nul 2>nul
-    if not errorlevel 1 (
-        set "PY_CMD=python"
-        goto :eof
-    )
-)
-echo Python 3.9 or newer was not found or could not run.
-echo Install current 64-bit Python from python.org and enable Add Python to PATH.
-echo.
-exit /b 1
-
-:verify_release_integrity
-echo Verifying v2.17.5 release identity and managed-file hashes...
-%PY_CMD% "%BOT_DIR%\%SCRIPT_NAME%" --verify-release
-if errorlevel 1 (
-    echo.
-    echo ERROR: Release identity/integrity verification BLOCKED startup.
-    echo No dependency install, browser start, or download activity will continue.
-    echo Run run_diagnose_export.bat for Support Export20 evidence, or restore the complete verified release ZIP.
-    echo.
-    exit /b 23
-)
-echo Release identity gate: PASS
-echo.
-goto :eof
-
-:ensure_core_dependencies
-%PY_CMD% -c "import requests, bs4, PIL" >nul 2>nul
-if not errorlevel 1 goto :eof
-echo Installing bounded core packages: requests beautifulsoup4 pillow
-echo This uses normal Python packaging and does not disable Norton, SmartScreen, or Windows protections.
-%PY_CMD% -m pip install --disable-pip-version-check "requests>=2.32,<3" "beautifulsoup4>=4.12,<5" "pillow>=10,<13"
-if errorlevel 1 (
-    echo Retrying as a user-level Python install...
-    %PY_CMD% -m pip install --user --disable-pip-version-check "requests>=2.32,<3" "beautifulsoup4>=4.12,<5" "pillow>=10,<13"
-)
-%PY_CMD% -c "import requests, bs4, PIL" >nul 2>nul
-if errorlevel 1 (
-    echo.
-    echo Failed to verify one or more core packages.
-    echo.
-    exit /b 1
-)
-goto :eof
-
-:end
-echo.
-if "%EXIT_CODE%"=="0" (
-    echo Gateway Image Downloader finished successfully.
-) else (
-    echo Gateway Image Downloader finished with exit code %EXIT_CODE%.
-)
-echo Finished: %DATE% %TIME%
-echo.
-pause
 endlocal & exit /b %EXIT_CODE%
