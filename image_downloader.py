@@ -58,8 +58,8 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 APP_NAME = "Gateway Image Downloader"
 APP_VERSION = "2026.08.09.1"
-BUILD_NAME = "v2176-canonical-entrypoint-project-local-outputs"
-BUILD_DATE = "2026-08-09 15:39 CDT"
+BUILD_NAME = "v2179-readonly-gate-order-repair"
+BUILD_DATE = "2026-08-15 01:00 CDT"
 CONFIG_FILENAME = "image_downloader_config.json"
 SCRIPT_FILENAME = "image_downloader.py"
 STATE_DIRNAME = "state"
@@ -150,7 +150,7 @@ EXPORT_FILE_LIMIT = 20
 EXPORT_MAX_ENTRY_BYTES = 5 * 1024 * 1024
 EXPORT_MAX_TOTAL_BYTES = 12 * 1024 * 1024
 EXPORT_SNAPSHOT_ATTEMPTS = 3
-PARAMETER_ALIGNMENT_VERSION = "project-framework-2026.08.09"
+PARAMETER_ALIGNMENT_VERSION = "2.17.9"
 ASSET_METADATA_SCHEMA = "asset-metadata-v1"
 PROJECT_SLUG = "image-downloader"
 PACKAGE_ASSET_ID = "IMGDL-PACKAGE"

@@ -1,7 +1,7 @@
 @echo off
 rem Asset ID: IMGDL-LEGACY-ALIAS-STANDARD
 rem Version: 2026.08.09.1
-rem Build: v2176-canonical-entrypoint-project-local-outputs
+rem Build: v2179-readonly-gate-order-repair
 rem Status: compatibility-redirect
 rem Copyright © 2026 Gateway Information Group LLC. All rights reserved.
 setlocal EnableExtensions
