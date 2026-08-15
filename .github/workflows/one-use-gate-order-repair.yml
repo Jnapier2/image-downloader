@@ -30,7 +30,15 @@ jobs:
 
       - name: Patch gate ordering and regenerate release identity
         shell: powershell
-        run: python .github/one_use_repair_image_downloader.py
+        run: |
+          $path = ".github/one_use_repair_image_downloader.py"
+          $script = [System.IO.File]::ReadAllText($path)
+          $old = "find_python_pattern.subn(find_python_replacement, launcher, count=1)"
+          $new = "find_python_pattern.subn(lambda _match: find_python_replacement, launcher, count=1)"
+          if (-not $script.Contains($old)) { throw "Expected regex replacement call was not found." }
+          $script = $script.Replace($old, $new)
+          [System.IO.File]::WriteAllText($path, $script, (New-Object System.Text.UTF8Encoding($false)))
+          python $path
 
       - name: Install bounded dependencies
         shell: powershell
