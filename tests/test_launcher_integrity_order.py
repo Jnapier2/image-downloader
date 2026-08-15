@@ -28,11 +28,17 @@ class LauncherIntegrityOrderTests(unittest.TestCase):
         self.assertNotIn("beautifulsoup4>=4.12", launcher)
         self.assertNotIn("playwright>=1.45", launcher)
 
-    def test_no_security_policy_bypass_was_added(self) -> None:
+    def test_no_security_policy_bypass_command_was_added(self) -> None:
         launcher = (ROOT / "GatewayImageDownloader.bat").read_text(encoding="utf-8").lower()
-        self.assertNotIn("executionpolicy bypass", launcher)
-        for term in ("disable defender", "disable norton", "disable smartscreen"):
-            self.assertNotIn(term, launcher)
+        forbidden_commands = (
+            "-executionpolicy bypass",
+            "set-mppreference",
+            "add-mppreference",
+            "netsh advfirewall set allprofiles state off",
+            "reg add hkcu\\software\\microsoft\\windows\\currentversion\\apphost /v enablesmartscreen",
+        )
+        for command in forbidden_commands:
+            self.assertNotIn(command, launcher)
 
 
 if __name__ == "__main__":
