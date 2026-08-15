@@ -1,0 +1,327 @@
+name: One-use Image Downloader gate-order repair
+
+on:
+  push:
+    branches:
+      - agent/image-downloader-gate-order-repair-20260815
+
+permissions:
+  contents: write
+
+concurrency:
+  group: image-downloader-gate-order-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Patch gate ordering and regenerate release identity
+        shell: powershell
+        run: |
+          @'
+          from __future__ import annotations
+
+          from pathlib import Path
+          import hashlib
+          import json
+          import re
+
+          root = Path.cwd()
+          old_build = "v2176-canonical-entrypoint-project-local-outputs"
+          new_build = "v2179-readonly-gate-order-repair"
+
+          def read_text(path: Path) -> str:
+              return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+          def write_lf(path: Path, text: str) -> None:
+              path.write_bytes(text.replace("\r\n", "\n").encode("utf-8"))
+
+          def write_crlf(path: Path, text: str) -> None:
+              normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+              path.write_bytes(normalized.replace("\n", "\r\n").encode("utf-8"))
+
+          launcher_path = root / "GatewayImageDownloader.bat"
+          launcher = read_text(launcher_path)
+
+          pre_gate_write = '''call :verify_write_dir "%BOT_DIR%"
+          if errorlevel 1 (
+              echo ERROR: Project folder is not writable: %BOT_DIR%
+              echo Recovery: move or extract the package to a normal writable folder and try again.
+              set "EXIT_CODE=1"
+              goto :end
+          )
+
+          '''
+          if launcher.count(pre_gate_write) != 1:
+              raise SystemExit("Expected exactly one pre-gate writeability block")
+          launcher = launcher.replace(pre_gate_write, "", 1)
+
+          normal_gate = '''call :verify_release_integrity
+          if errorlevel 1 (
+              set "EXIT_CODE=23"
+              goto :end
+          )
+          call :ensure_core_dependencies
+          '''
+          normal_gate_repaired = '''call :verify_release_integrity
+          if errorlevel 1 (
+              set "EXIT_CODE=23"
+              goto :end
+          )
+          call :verify_write_dir "%BOT_DIR%"
+          if errorlevel 1 (
+              echo ERROR: Project folder is not writable: %BOT_DIR%
+              echo Recovery: move or extract the package to a normal writable folder and try again.
+              set "EXIT_CODE=1"
+              goto :end
+          )
+          call :ensure_core_dependencies
+          '''
+          if launcher.count(normal_gate) != 1:
+              raise SystemExit("Normal launch gate block was not found exactly once")
+          launcher = launcher.replace(normal_gate, normal_gate_repaired, 1)
+
+          diagnostic_anchor = '''if errorlevel 1 (
+              echo Release identity gate is BLOCKED. Report-only Export20 remains intentionally available.
+              echo.
+          )
+          echo Ready: creating report-only project-local Support Export20.
+          '''
+          diagnostic_repaired = '''if errorlevel 1 (
+              echo Release identity gate is BLOCKED. Report-only Export20 remains intentionally available.
+              echo.
+          )
+          call :verify_write_dir "%BOT_DIR%"
+          if errorlevel 1 (
+              echo ERROR: Project folder is not writable; Support Export20 cannot be finalized here.
+              set "EXIT_CODE=1"
+              goto :end
+          )
+          echo Ready: creating report-only project-local Support Export20.
+          '''
+          if launcher.count(diagnostic_anchor) != 1:
+              raise SystemExit("Diagnostic gate block was not found exactly once")
+          launcher = launcher.replace(diagnostic_anchor, diagnostic_repaired, 1)
+
+          find_python_pattern = re.compile(r'(?ms)^:find_python\n.*?^exit /b 1\n\n:verify_release_integrity\n')
+          find_python_replacement = r''':find_python
+          if exist "%BOT_DIR%\.venv\Scripts\python.exe" (
+              "%BOT_DIR%\.venv\Scripts\python.exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>nul
+              if not errorlevel 1 (
+                  set "PY_CMD=\"%BOT_DIR%\.venv\Scripts\python.exe\""
+                  exit /b 0
+              )
+          )
+          where py >nul 2>nul
+          if not errorlevel 1 (
+              py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>nul
+              if not errorlevel 1 (
+                  set "PY_CMD=py -3"
+                  exit /b 0
+              )
+          )
+          where python >nul 2>nul
+          if not errorlevel 1 (
+              python -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>nul
+              if not errorlevel 1 (
+                  set "PY_CMD=python"
+                  exit /b 0
+              )
+          )
+          echo ERROR: Python 3.11 or newer was not found or could not run.
+          echo Install current 64-bit Python from python.org and enable Add Python to PATH.
+          exit /b 1
+
+          :verify_release_integrity
+          '''
+          launcher, replacements = find_python_pattern.subn(find_python_replacement, launcher, count=1)
+          if replacements != 1:
+              raise SystemExit("Python selection function replacement failed")
+
+          launcher = launcher.replace(
+              '%PY_CMD% -m pip install --disable-pip-version-check "requests>=2.32,<3" "beautifulsoup4>=4.12,<5" "pillow>=10,<13"',
+              '%PY_CMD% -m pip install --disable-pip-version-check --only-binary=:all: -r "%BOT_DIR%\\requirements.txt"'
+          )
+          launcher = launcher.replace(
+              '%PY_CMD% -m pip install --user --disable-pip-version-check "requests>=2.32,<3" "beautifulsoup4>=4.12,<5" "pillow>=10,<13"',
+              '%PY_CMD% -m pip install --user --disable-pip-version-check --only-binary=:all: -r "%BOT_DIR%\\requirements.txt"'
+          )
+          launcher = launcher.replace(
+              '%PY_CMD% -m pip install --disable-pip-version-check "playwright>=1.45,<2"',
+              '%PY_CMD% -m pip install --disable-pip-version-check --only-binary=:all: -r "%BOT_DIR%\\requirements-browser.txt"'
+          )
+          launcher = launcher.replace(
+              '%PY_CMD% -m pip install --user --disable-pip-version-check "playwright>=1.45,<2"',
+              '%PY_CMD% -m pip install --user --disable-pip-version-check --only-binary=:all: -r "%BOT_DIR%\\requirements-browser.txt"'
+          )
+          if "beautifulsoup4>=4.12" in launcher or "playwright>=1.45" in launcher:
+              raise SystemExit("Stale inline dependency constraints remain")
+          launcher = launcher.replace(old_build, new_build)
+          write_crlf(launcher_path, launcher)
+
+          bat_files = [
+              "GatewayImageDownloader_SafeBrowser.bat",
+              "GatewayImageDownloader_DiagnosticsExport.bat",
+              "run_image_downloader.bat",
+              "run_image_downloader_safe_browser.bat",
+              "run_diagnose_export.bat",
+          ]
+          for name in bat_files:
+              path = root / name
+              text = read_text(path)
+              if old_build not in text:
+                  raise SystemExit(f"Expected old build ID in {name}")
+              write_crlf(path, text.replace(old_build, new_build))
+
+          source_path = root / "image_downloader.py"
+          source = read_text(source_path)
+          source = source.replace(f'BUILD_NAME = "{old_build}"', f'BUILD_NAME = "{new_build}"', 1)
+          source = source.replace('BUILD_DATE = "2026-08-09 15:39 CDT"', 'BUILD_DATE = "2026-08-15 01:00 CDT"', 1)
+          source = source.replace('PARAMETER_ALIGNMENT_VERSION = "project-framework-2026.08.09"', 'PARAMETER_ALIGNMENT_VERSION = "2.17.9"', 1)
+          if old_build in source:
+              raise SystemExit("Old build ID remains in application source")
+          write_lf(source_path, source)
+
+          version_path = root / "VERSION.txt"
+          version_text = read_text(version_path).replace(old_build, new_build)
+          version_text = version_text.replace("Public package refreshed: 2026-08-11", "Public package refreshed: 2026-08-15")
+          repair_line = "Public source repair: 2026-08-15 — read-only integrity-gate ordering and Python 3.11 launcher contract\n"
+          if repair_line.strip() not in version_text:
+              version_text = version_text.replace("Canonical launcher:", repair_line + "Canonical launcher:")
+          write_lf(version_path, version_text)
+
+          metadata_path = root / "PACKAGE_METADATA.json"
+          metadata = json.loads(read_text(metadata_path))
+          metadata["build_id"] = new_build
+          metadata["public_package_date"] = "2026-08-15"
+          metadata["parameter_baseline"] = "2.17.9"
+          metadata["source_repair"] = {
+              "date": "2026-08-15",
+              "scope": "read-only integrity-gate ordering, Python 3.11 launcher contract, local virtual-environment preference, and requirements-file dependency alignment",
+              "runtime_behavior_changed": False,
+          }
+          metadata["runtime_identity_gate"]["ordering"] = "before any project-root write, dependency change, browser, or network activity"
+          metadata["runtime"]["python_min"] = "3.11"
+          write_lf(metadata_path, json.dumps(metadata, indent=2, ensure_ascii=False) + "\n")
+
+          readme_path = root / "README.md"
+          readme = read_text(readme_path).replace(old_build, new_build)
+          readme = readme.replace("Python 3.9", "Python 3.11")
+          write_lf(readme_path, readme)
+
+          changelog_path = root / "CHANGELOG.md"
+          changelog = read_text(changelog_path)
+          section = f'''## 2026.08.09.1 build {new_build} — 2026-08-15
+
+          - Moved the project writeability probe after the read-only release-identity decision.
+          - Aligned the canonical launcher with the documented Python 3.11 minimum and preferred the project-local `.venv`.
+          - Replaced stale inline dependency constraints with the versioned requirements files.
+          - Added regression checks for gate ordering, interpreter selection, and dependency-contract alignment.
+
+          '''
+          if section.splitlines()[0] not in changelog:
+              changelog = changelog.replace("# Changelog\n\n", "# Changelog\n\n" + section, 1)
+          write_lf(changelog_path, changelog)
+
+          test_path = root / "tests" / "test_public_release.py"
+          tests = read_text(test_path).replace(old_build, new_build)
+          write_lf(test_path, tests)
+
+          order_test = '''from __future__ import annotations
+
+          from pathlib import Path
+          import unittest
+
+
+          ROOT = Path(__file__).resolve().parents[1]
+
+
+          class LauncherIntegrityOrderTests(unittest.TestCase):
+              def test_integrity_decision_precedes_project_write(self) -> None:
+                  launcher = (ROOT / "GatewayImageDownloader.bat").read_text(encoding="utf-8").replace("\\r\\n", "\\n")
+                  main_flow = launcher.split("\\n:diagnostics_export\\n", 1)[0]
+                  self.assertLess(main_flow.index("call :verify_release_integrity"), main_flow.index('call :verify_write_dir "%BOT_DIR%"'))
+
+                  diagnostics = launcher.split("\\n:diagnostics_export\\n", 1)[1].split("\\n:verify_write_dir\\n", 1)[0]
+                  self.assertLess(diagnostics.index("--verify-release"), diagnostics.index('call :verify_write_dir "%BOT_DIR%"'))
+                  self.assertLess(diagnostics.index('call :verify_write_dir "%BOT_DIR%"'), diagnostics.index("--export-support"))
+
+              def test_python_and_dependency_contracts_are_single_source(self) -> None:
+                  launcher = (ROOT / "GatewayImageDownloader.bat").read_text(encoding="utf-8")
+                  self.assertNotIn("(3,9)", launcher)
+                  self.assertGreaterEqual(launcher.count("(3,11)"), 3)
+                  self.assertIn(r'.venv\\Scripts\\python.exe', launcher)
+                  self.assertLess(launcher.index(r'.venv\\Scripts\\python.exe'), launcher.index("where py"))
+                  self.assertIn(r'-r "%BOT_DIR%\\requirements.txt"', launcher)
+                  self.assertIn(r'-r "%BOT_DIR%\\requirements-browser.txt"', launcher)
+                  self.assertNotIn("beautifulsoup4>=4.12", launcher)
+                  self.assertNotIn("playwright>=1.45", launcher)
+
+              def test_no_security_policy_bypass_was_added(self) -> None:
+                  launcher = (ROOT / "GatewayImageDownloader.bat").read_text(encoding="utf-8").lower()
+                  self.assertNotIn("executionpolicy bypass", launcher)
+                  for term in ("disable defender", "disable norton", "disable smartscreen"):
+                      self.assertNotIn(term, launcher)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          '''
+          order_test = "\n".join(line[10:] if line.startswith("          ") else line for line in order_test.splitlines()) + "\n"
+          write_lf(root / "tests" / "test_launcher_integrity_order.py", order_test)
+
+          manifest_path = root / "MANIFEST.json"
+          manifest = json.loads(read_text(manifest_path))
+          manifest["build_id"] = new_build
+          manifest["generated_at_utc"] = "2026-08-15T06:00:00Z"
+          for entry in manifest.get("files", []):
+              rel = entry.get("path")
+              if not isinstance(rel, str) or not rel:
+                  raise SystemExit("Manifest contains an invalid path")
+              target = root / rel
+              if not target.is_file():
+                  raise SystemExit(f"Managed file missing: {rel}")
+              data = target.read_bytes()
+              entry["size_bytes"] = len(data)
+              entry["sha256"] = hashlib.sha256(data).hexdigest()
+          write_lf(manifest_path, json.dumps(manifest, indent=4, ensure_ascii=False) + "\n")
+          '@ | Set-Content -LiteralPath "$env:RUNNER_TEMP\repair_image_downloader.py" -Encoding UTF8
+          python "$env:RUNNER_TEMP\repair_image_downloader.py"
+
+      - name: Install bounded dependencies
+        shell: powershell
+        run: python -m pip install --only-binary=:all: -r requirements.txt
+
+      - name: Verify dependency consistency
+        shell: powershell
+        run: python -m pip check
+
+      - name: Compile and test exact repaired tree
+        shell: powershell
+        run: |
+          python -m compileall -q image_downloader.py tests
+          python -m unittest discover -s tests -v
+          python image_downloader.py --verify-release
+
+      - name: Commit repaired source and remove finalizer
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath ".github/workflows/one-use-gate-order-repair.yml" -Force
+          git config user.name "Jerry R. Napier"
+          git config user.email "41520658+Jnapier2@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Repair Image Downloader integrity-gate ordering"
+          git push origin "HEAD:${{ github.ref_name }}"
