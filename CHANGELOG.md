@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026.08.09.1 build v2179-readonly-gate-order-repair — 2026-08-15
+
+- Moved the project writeability probe after the read-only release-identity decision.
+- Aligned the canonical launcher with the documented Python 3.11 minimum and preferred the project-local `.venv`.
+- Replaced stale inline dependency constraints with the versioned requirements files.
+- Added regression checks for gate ordering, interpreter selection, and dependency-contract alignment.
+
 ## 2026.08.09.1
 
 - Added `GatewayImageDownloader.bat` as the stable Windows entrypoint, with separate safe-browser and diagnostics helpers.

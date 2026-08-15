@@ -1,131 +1,131 @@
 {
-    "schema_version":  "public-source-manifest-v2",
-    "package_id":  "gateway-image-downloader",
-    "version":  "2026.08.09.1",
-    "build_id":  "v2176-canonical-entrypoint-project-local-outputs",
-    "generated_at_utc":  "2026-08-11T19:34:51Z",
-    "scope":  "sanitized public source release",
-    "execution_namespace":  "GatewayImageDownloader",
-    "canonical_entrypoint":  "GatewayImageDownloader.bat",
-    "backend_target":  "image_downloader.py",
-    "project_output_roots":  {
-                                 "config_file":  "image_downloader_config.json",
-                                 "downloads":  "downloads",
-                                 "logs":  "logs",
-                                 "state":  "state",
-                                 "temp":  "temp",
-                                 "reports":  "reports",
-                                 "exports":  "exports",
-                                 "backups":  "state/migration_backups"
-                             },
-    "files":  [
-                  {
-                      "path":  "image_downloader.py",
-                      "size_bytes":  429032,
-                      "sha256":  "374a9cf270ae8abb1e21f7d602813ddc028534ce8d1a87b7fcf52aa2e52179c5",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "GatewayImageDownloader.bat",
-                      "size_bytes":  7913,
-                      "sha256":  "bd2f8f99aec8847dd6b926de0d55ce8c387d9023df37796ee4f5485aea245a0e",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "GatewayImageDownloader_SafeBrowser.bat",
-                      "size_bytes":  693,
-                      "sha256":  "40d07c620faea597fc992633aa7d5d619a339543587a9ca848d690026a2a8c69",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "GatewayImageDownloader_DiagnosticsExport.bat",
-                      "size_bytes":  725,
-                      "sha256":  "b9d7f23ec2d86426144d3088183a8f1541fddfa5d6b04b3bbdaf4374a47e9002",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "run_image_downloader.bat",
-                      "size_bytes":  807,
-                      "sha256":  "2616f3d142b142c59d092a37f3d8ff9eec371ed9628683c1c1a53081f9d0e932",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "run_image_downloader_safe_browser.bat",
-                      "size_bytes":  870,
-                      "sha256":  "a24c1c7a77e9e53928f8fc6bf3ff2a775a638df4330a0e45154e3c4f72e33917",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "run_diagnose_export.bat",
-                      "size_bytes":  851,
-                      "sha256":  "b86b4bdf93481a1bd19b7aaa1bb69a4e30bf9e9791c51f259fa9c1af5562473c",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "README.md",
-                      "size_bytes":  6671,
-                      "sha256":  "4cbe614bc40fb7e3ff0aa16463383090af3518d723b547c9ea978165c62ee6ce",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "CHANGELOG.md",
-                      "size_bytes":  2395,
-                      "sha256":  "9e9b618303c86b83d7f42ea0ec6d7204c31763cd2a109e12512743245fcfcfae",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "VERSION.txt",
-                      "size_bytes":  461,
-                      "sha256":  "d6bbb78ba26d3efed7df69e9a090196d1a1406aeccec2e9924d810e7cf5adb5d",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "PACKAGE_METADATA.json",
-                      "size_bytes":  2418,
-                      "sha256":  "e39c60d063705646210cb3bad86ad3178edb18565ca2ed7e4ea8873420309990",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "requirements.txt",
-                      "size_bytes":  59,
-                      "sha256":  "5ad43c3923e9bcb3cf5f9a08907df694b02f95273eb031ff7ff328234588a7a1",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "requirements-browser.txt",
-                      "size_bytes":  42,
-                      "sha256":  "819459021f511e2234f7011c2f973089cf4a53916117a2b52460d1d07bdd8eb1",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "image_downloader_config.example.json",
-                      "size_bytes":  1392,
-                      "sha256":  "df2e95d5a03fe10a980656c85910798247d4c00a6474eb8c91170d945681e19c",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "LICENSE.md",
-                      "size_bytes":  579,
-                      "sha256":  "70421d0162b64bf0f5d7c0a63c969d6bcc176f80ce8a21ed3e068d3054013d5b",
-                      "package_managed":  true
-                  },
-                  {
-                      "path":  "SECURITY.md",
-                      "size_bytes":  1547,
-                      "sha256":  "323e1419e01bbf4f8607ad1d71f9813d55f02c3ca4f5ed7f42a7a884f0e4c7b9",
-                      "package_managed":  true
-                  }
-              ],
-    "mutable_exclusions":  [
-                               "image_downloader_config.json",
-                               "downloads/",
-                               "logs/",
-                               "state/",
-                               "temp/",
-                               "reports/",
-                               "exports/",
-                               "cache/",
-                               "caches/"
-                           ],
-    "copyright_notice":  "Copyright © 2026 Gateway Information Group LLC. All rights reserved."
+    "schema_version": "public-source-manifest-v2",
+    "package_id": "gateway-image-downloader",
+    "version": "2026.08.09.1",
+    "build_id": "v2179-readonly-gate-order-repair",
+    "generated_at_utc": "2026-08-15T06:00:00Z",
+    "scope": "sanitized public source release",
+    "execution_namespace": "GatewayImageDownloader",
+    "canonical_entrypoint": "GatewayImageDownloader.bat",
+    "backend_target": "image_downloader.py",
+    "project_output_roots": {
+        "config_file": "image_downloader_config.json",
+        "downloads": "downloads",
+        "logs": "logs",
+        "state": "state",
+        "temp": "temp",
+        "reports": "reports",
+        "exports": "exports",
+        "backups": "state/migration_backups"
+    },
+    "files": [
+        {
+            "path": "image_downloader.py",
+            "size_bytes": 428994,
+            "sha256": "a3cadd898450b6c475929c6342c1b04ea1ed2a91acfc533beb3e2e4dc963aec6",
+            "package_managed": true
+        },
+        {
+            "path": "GatewayImageDownloader.bat",
+            "size_bytes": 8417,
+            "sha256": "453ad1d196de3ffd54a97dca1eb646782327832bea1848d6187747b466de652e",
+            "package_managed": true
+        },
+        {
+            "path": "GatewayImageDownloader_SafeBrowser.bat",
+            "size_bytes": 677,
+            "sha256": "2e09f54b8e6cd03cb3e6bd187af9070ce503f7ba49538a2be12bc3177f2e858b",
+            "package_managed": true
+        },
+        {
+            "path": "GatewayImageDownloader_DiagnosticsExport.bat",
+            "size_bytes": 709,
+            "sha256": "4d22c0509951651c8e3c258fe2c253afa1a1030b373d00c83e8b8f9e8450ecf0",
+            "package_managed": true
+        },
+        {
+            "path": "run_image_downloader.bat",
+            "size_bytes": 791,
+            "sha256": "4922df75ccbe0c5b1fc70b659d2ffbd75038399bc8aa072b5c10a8efb7a016c1",
+            "package_managed": true
+        },
+        {
+            "path": "run_image_downloader_safe_browser.bat",
+            "size_bytes": 854,
+            "sha256": "e65fecf7643e8078ba973a23b1d461358a451d13211468ebf39a34aa4437e4d0",
+            "package_managed": true
+        },
+        {
+            "path": "run_diagnose_export.bat",
+            "size_bytes": 835,
+            "sha256": "2289045db9e60c2c9196ac8595d8bf14a64f4ab549b3e7f734275776e2223314",
+            "package_managed": true
+        },
+        {
+            "path": "README.md",
+            "size_bytes": 6671,
+            "sha256": "4cbe614bc40fb7e3ff0aa16463383090af3518d723b547c9ea978165c62ee6ce",
+            "package_managed": true
+        },
+        {
+            "path": "CHANGELOG.md",
+            "size_bytes": 2856,
+            "sha256": "fd4e80bebdb00e7c6a5a264d104dc922d9aa7813b81e406fcb9558f73af94d94",
+            "package_managed": true
+        },
+        {
+            "path": "VERSION.txt",
+            "size_bytes": 550,
+            "sha256": "ea0d0537360a39081eb693befa02f7d6cf7effc93af19b1ccc6bf26496184b37",
+            "package_managed": true
+        },
+        {
+            "path": "PACKAGE_METADATA.json",
+            "size_bytes": 2744,
+            "sha256": "27bb5ba9ad2720f31f6da2a9e15811d7ef95f0fc3e927b79b83d3fa265777148",
+            "package_managed": true
+        },
+        {
+            "path": "requirements.txt",
+            "size_bytes": 59,
+            "sha256": "5ad43c3923e9bcb3cf5f9a08907df694b02f95273eb031ff7ff328234588a7a1",
+            "package_managed": true
+        },
+        {
+            "path": "requirements-browser.txt",
+            "size_bytes": 42,
+            "sha256": "819459021f511e2234f7011c2f973089cf4a53916117a2b52460d1d07bdd8eb1",
+            "package_managed": true
+        },
+        {
+            "path": "image_downloader_config.example.json",
+            "size_bytes": 1392,
+            "sha256": "df2e95d5a03fe10a980656c85910798247d4c00a6474eb8c91170d945681e19c",
+            "package_managed": true
+        },
+        {
+            "path": "LICENSE.md",
+            "size_bytes": 579,
+            "sha256": "70421d0162b64bf0f5d7c0a63c969d6bcc176f80ce8a21ed3e068d3054013d5b",
+            "package_managed": true
+        },
+        {
+            "path": "SECURITY.md",
+            "size_bytes": 1547,
+            "sha256": "323e1419e01bbf4f8607ad1d71f9813d55f02c3ca4f5ed7f42a7a884f0e4c7b9",
+            "package_managed": true
+        }
+    ],
+    "mutable_exclusions": [
+        "image_downloader_config.json",
+        "downloads/",
+        "logs/",
+        "state/",
+        "temp/",
+        "reports/",
+        "exports/",
+        "cache/",
+        "caches/"
+    ],
+    "copyright_notice": "Copyright © 2026 Gateway Information Group LLC. All rights reserved."
 }

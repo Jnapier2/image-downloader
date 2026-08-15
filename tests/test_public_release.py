@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class PublicReleaseTests(unittest.TestCase):
     def test_release_identity_is_current_and_complete(self) -> None:
         self.assertEqual(app.APP_VERSION, "2026.08.09.1")
-        self.assertEqual(app.BUILD_NAME, "v2176-canonical-entrypoint-project-local-outputs")
+        self.assertEqual(app.BUILD_NAME, "v2179-readonly-gate-order-repair")
         self.assertEqual(app.CANONICAL_ENTRYPOINT, "GatewayImageDownloader.bat")
         self.assertEqual(app.CANONICAL_EXPORT_FILENAME, "IMAGE_DOWNLOADER_SUPPORT_EXPORT.zip")
         status = app.verify_release_identity(ROOT)

@@ -1,7 +1,7 @@
 @echo off
 rem Asset ID: IMGDL-ENTRYPOINT-SAFE-BROWSER
 rem Version: 2026.08.09.1
-rem Build: v2176-canonical-entrypoint-project-local-outputs
+rem Build: v2179-readonly-gate-order-repair
 rem Status: current
 rem Sensitivity: public-source
 rem Copyright © 2026 Gateway Information Group LLC. All rights reserved.
