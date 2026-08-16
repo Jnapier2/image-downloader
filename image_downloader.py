@@ -6360,7 +6360,7 @@ def project_health_review(root: Path, config_path: Path) -> str:
         "- FIXED: Candidate/backpressure limits are explicit and exported.",
         "",
         "Layer map:",
-        "1. BAT launcher layer: GatewayImageDownloader.bat resolves its own project folder, finds Python, runs the release identity gate, then installs bounded dependencies only after PASS; namespaced helpers and legacy redirects contain no duplicated backend logic.",
+        "1. BAT launcher layer: GatewayImageDownloader.bat resolves its own project folder, finds Python, runs the release identity gate, then installs bounded dependencies only after PASS; namespaced helpers and legacy redirects contain no duplicated runtime implementation.",
         "2. CLI/session layer: keep mode flags and interactive loop isolated from download logic.",
         "3. Network layer: separate connect/read timeouts, monotonic caps, Retry-After/backoff, coalesced VPN/IP session refresh, connectivity-only extra retries, validator-gated Range resume, thread-local sessions, and local adaptive concurrency feedback.",
         "4. Parser/discovery layer: HTML attributes, responsive srcsets/imagesrcset, metadata, JSON-LD, CSS, noscript, optional browser response capture, gallery candidates, and sequential seeds.",

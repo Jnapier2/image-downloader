@@ -71,7 +71,7 @@
   },
   "copyright_notice": "Copyright © 2026 Gateway Information Group LLC. All rights reserved.",
   "rights": "Third-party packages and services retain their own licenses and terms.",
-  "parameter_baseline": "2.17.9",
+  "release_framework_version": "2.17.9",
   "source_repair": {
     "date": "2026-08-15",
     "scope": "read-only integrity-gate ordering, Python 3.11 launcher contract, local virtual-environment preference, and requirements-file dependency alignment",
