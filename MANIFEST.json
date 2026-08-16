@@ -21,8 +21,8 @@
     "files": [
         {
             "path": "image_downloader.py",
-            "size_bytes": 428994,
-            "sha256": "a3cadd898450b6c475929c6342c1b04ea1ed2a91acfc533beb3e2e4dc963aec6",
+            "size_bytes": 429003,
+            "sha256": "4f73508612330b2c6a09a780f625e3065cc77748c57f471c17093f8797d55ad3",
             "package_managed": true
         },
         {
@@ -81,8 +81,8 @@
         },
         {
             "path": "PACKAGE_METADATA.json",
-            "size_bytes": 2744,
-            "sha256": "27bb5ba9ad2720f31f6da2a9e15811d7ef95f0fc3e927b79b83d3fa265777148",
+            "size_bytes": 2751,
+            "sha256": "44c46032cbff760ac141d3f9f348d710afc6f7933a8dff56d7cc63e2658d97e3",
             "package_managed": true
         },
         {
