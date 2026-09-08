@@ -12,6 +12,8 @@ Include the affected version, a minimal reproduction using synthetic or openly l
 
 ## Intended security boundary
 
-Image Downloader retrieves public HTTP(S) pages and image resources supplied by the user. It rejects credentials embedded in URLs and blocks loopback, private, link-local, and otherwise non-global destinations after DNS resolution, across redirects, and in optional browser subrequests. It does not automate login, bypass access controls, or execute retained files. Candidate URLs, response content types, extensions, file sizes, raster structure, and SVG active content are validated before retention. Site permission and policy decisions remain the user's responsibility.
+Image Downloader is a local tool for trusted, permitted HTTP(S) pages and image resources supplied by the user. It does not provide private-network isolation. URL normalization accepts HTTP(S) addresses but does not reject embedded credentials or enforce a public-address allowlist. Initial requests, redirects, and optional browser subrequests can reach destinations accessible from the host computer.
 
-Hostname screening is defense in depth, not a complete network-isolation boundary. Standard HTTP and browser clients can resolve a hostname again between validation and connection, so a hostile DNS service could change its answer. Do not process untrusted URLs from a sensitive network; use an isolated environment when the source itself is adversarial.
+Use only trusted sources, omit credentials from URLs, and do not expose the application as a service that accepts links from other people. Use a separately isolated environment when reviewing unfamiliar sources; browser mode is not a sandbox or an access-control bypass.
+
+The application does not automate login or execute retained files. It checks response content types, extensions, file sizes, raster structure, SVG active content, and output paths before retaining media. These checks reduce content-handling risks but are not malware detection or network isolation. Keep operating-system, browser, and antivirus protections enabled. Site permission and policy decisions remain the user's responsibility.

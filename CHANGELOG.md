@@ -1,5 +1,12 @@
 # Changelog
 
+## Documentation correction — 2026-09-07
+
+- Corrected README and security guidance that overstated private-address blocking, credential-in-URL rejection, and browser request screening in the current source.
+- Distinguished content and output-path checks from network isolation, and aligned the testing description with the actual repository suite.
+- Updated managed documentation hashes and recorded the documentation revision. Application source, runtime version, launchers, dependencies, and existing shortcuts are unchanged.
+- Earlier changelog statements about private-address controls are historical claims, not evidence that the current source enforces those controls. The current Security Policy is authoritative for the supported boundary.
+
 ## 2026.08.09.1 build v2179-readonly-gate-order-repair — 2026-08-15
 
 - Moved the project writeability probe after the read-only release-identity decision.
