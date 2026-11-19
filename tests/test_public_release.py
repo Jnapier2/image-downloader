@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import image_downloader as app
 
@@ -21,6 +27,29 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertEqual(status["verified_count"], 16)
         self.assertEqual(status["managed_count"], 16)
         self.assertEqual(status["mismatches"], [])
+
+    def test_old_pillow_blocks_image_processing_but_preserves_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stale_pillow = SimpleNamespace(__version__="12.3.0")
+            with (
+                patch.dict(sys.modules, {"PIL": stale_pillow}),
+                patch.object(app, "app_root", return_value=root),
+                patch.object(app, "verify_release_identity", return_value={"result": "PASS"}),
+                patch.object(app, "run_self_test") as self_test,
+                patch.object(app, "ImageDownloader") as downloader,
+                patch.object(app, "write_diagnostics", return_value=root / "report.txt") as diagnose,
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
+                self.assertEqual(app.main(["--url", "https://example.org/image.png"]), 1)
+                self.assertEqual(app.main(["--self-test"]), 1)
+                self.assertEqual(app.main(["--verify-core-dependencies"]), 1)
+                self.assertIn("Pillow 13 is required", output.getvalue())
+                self.assertEqual(app.main(["--version"]), 0)
+                self.assertEqual(app.main(["--diagnose"]), 0)
+                self_test.assert_not_called()
+                downloader.assert_not_called()
+                diagnose.assert_called_once()
 
     def test_defaults_keep_work_bounded_and_recoverable(self) -> None:
         config = app.default_config()

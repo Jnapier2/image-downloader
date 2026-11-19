@@ -99,8 +99,8 @@ if errorlevel 1 (
     goto :end
 )
 call :ensure_core_dependencies
-if errorlevel 1 (
-    set "EXIT_CODE=1"
+if not "%ERRORLEVEL%"=="0" (
+    set "EXIT_CODE=%ERRORLEVEL%"
     goto :end
 )
 
@@ -159,7 +159,7 @@ exit /b 0
 if exist "%BOT_DIR%\.venv\Scripts\python.exe" (
     "%BOT_DIR%\.venv\Scripts\python.exe" -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>nul
     if not errorlevel 1 (
-        set "PY_CMD=\"%BOT_DIR%\.venv\Scripts\python.exe\""
+        set PY_CMD="%BOT_DIR%\.venv\Scripts\python.exe"
         exit /b 0
     )
 )
@@ -200,21 +200,20 @@ echo.
 exit /b 0
 
 :ensure_core_dependencies
-%PY_CMD% -c "import requests, bs4, PIL" >nul 2>nul
-if not errorlevel 1 exit /b 0
-echo Installing bounded core packages: requests beautifulsoup4 pillow
+%PY_CMD% "%BOT_DIR%\%SCRIPT_NAME%" --verify-core-dependencies >nul 2>nul
+if not "%ERRORLEVEL%"=="1" exit /b %ERRORLEVEL%
+echo Installing or updating core packages from requirements.txt, including Pillow 13.
 echo This uses normal Python packaging and does not disable Norton, SmartScreen, or Windows protections.
 %PY_CMD% -m pip install --disable-pip-version-check --only-binary=:all: -r "%BOT_DIR%\requirements.txt"
 if errorlevel 1 (
     echo Retrying as a user-level Python install...
     %PY_CMD% -m pip install --user --disable-pip-version-check --only-binary=:all: -r "%BOT_DIR%\requirements.txt"
 )
-%PY_CMD% -c "import requests, bs4, PIL" >nul 2>nul
-if errorlevel 1 (
-    echo ERROR: Failed to verify one or more core Python packages.
-    exit /b 1
-)
-exit /b 0
+%PY_CMD% "%BOT_DIR%\%SCRIPT_NAME%" --verify-core-dependencies >nul 2>nul
+if not "%ERRORLEVEL%"=="1" exit /b %ERRORLEVEL%
+echo ERROR: Failed to verify one or more core Python packages.
+echo Review the installation messages above, then rerun this launcher.
+exit /b 1
 
 :ensure_browser_dependencies
 %PY_CMD% -c "import playwright" >nul 2>nul

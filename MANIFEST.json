@@ -21,14 +21,14 @@
     "files": [
         {
             "path": "image_downloader.py",
-            "size_bytes": 429003,
-            "sha256": "4f73508612330b2c6a09a780f625e3065cc77748c57f471c17093f8797d55ad3",
+            "size_bytes": 430468,
+            "sha256": "725df8282f7498f8071be360bda19b1e81ff15aa4b6947fbb60455ae14ad0294",
             "package_managed": true
         },
         {
             "path": "GatewayImageDownloader.bat",
-            "size_bytes": 8417,
-            "sha256": "453ad1d196de3ffd54a97dca1eb646782327832bea1848d6187747b466de652e",
+            "size_bytes": 8593,
+            "sha256": "10cff559496f8f300a9a300caa304cf63af6e52a834c9acc7d78c8d85a3436a9",
             "package_managed": true
         },
         {
@@ -63,8 +63,8 @@
         },
         {
             "path": "README.md",
-            "size_bytes": 6830,
-            "sha256": "a4506dad1d6c0d92eb82bc9fb647199beab77b49d62e4ece618a419fc6c185be",
+            "size_bytes": 7103,
+            "sha256": "8b819ac2a68680c13429406e5188577ecb36f85b49bce2cbe3aecf9f8abaacc8",
             "package_managed": true
         },
         {
@@ -87,8 +87,8 @@
         },
         {
             "path": "requirements.txt",
-            "size_bytes": 59,
-            "sha256": "5ad43c3923e9bcb3cf5f9a08907df694b02f95273eb031ff7ff328234588a7a1",
+            "size_bytes": 63,
+            "sha256": "0e357d13b71694e9a0ec3c80b11cb00bf6b3da248176a9833a1585fd6b87855d",
             "package_managed": true
         },
         {
