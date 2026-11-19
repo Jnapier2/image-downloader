@@ -87,8 +87,8 @@
         },
         {
             "path": "requirements.txt",
-            "size_bytes": 59,
-            "sha256": "5ad43c3923e9bcb3cf5f9a08907df694b02f95273eb031ff7ff328234588a7a1",
+            "size_bytes": 63,
+            "sha256": "0e357d13b71694e9a0ec3c80b11cb00bf6b3da248176a9833a1585fd6b87855d",
             "package_managed": true
         },
         {
