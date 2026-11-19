@@ -1479,7 +1479,7 @@ def require_requests():
     except Exception as exc:
         raise RuntimeError(
             f"The requests package is required. Run {CANONICAL_ENTRYPOINT} so it can install core packages, "
-            "or install it with: python -m pip install requests beautifulsoup4 pillow"
+            "or install the supported dependencies with: python -m pip install -r requirements.txt"
         ) from exc
 
 
@@ -1489,6 +1489,24 @@ def optional_bs4():
         return BeautifulSoup
     except Exception:
         return None
+
+
+def verify_pillow_runtime() -> bool:
+    try:
+        pillow = importlib.import_module("PIL")
+        version = getattr(pillow, "__version__", "")
+        if isinstance(version, str) and re.fullmatch(
+            r"13(?:\.[0-9]+)*(?:\.post[0-9]+)?(?:\+[a-z0-9]+(?:[._-][a-z0-9]+)*)?",
+            version,
+        ):
+            importlib.import_module("PIL.Image")
+            return True
+    except Exception:
+        pass
+    print("Pillow 13 is required for image processing.")
+    print("Run the Windows launcher or use this project's Python to install dependencies:")
+    print("python -m pip install --only-binary=:all: -r requirements.txt")
+    return False
 
 
 def optional_pil_image():
@@ -7514,6 +7532,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--export-support", action="store_true", help="Create a <=20-file support ZIP")
     parser.add_argument("--self-test", action="store_true", help="Run local sanity checks")
     parser.add_argument("--verify-release", action="store_true", help="Verify release identity and every package-managed file, then exit")
+    parser.add_argument("--verify-core-dependencies", action="store_true", help="Check core Python dependencies and exit")
     parser.add_argument("--version", action="store_true", help="Show version and exit")
     return parser.parse_args(argv)
 
@@ -7526,16 +7545,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     root = app_root()
     # Release ordering: canonical root/log setup, then read-only identity/hash gate,
     # before dependency installs, credentials, browser startup, or download/network activity.
-    (root / LOG_DIRNAME).mkdir(parents=True, exist_ok=True)
+    if not args.verify_core_dependencies:
+        (root / LOG_DIRNAME).mkdir(parents=True, exist_ok=True)
     gate_evidence = verify_release_identity(root)
     if args.verify_release:
         print_release_identity_result(gate_evidence)
         return 0 if gate_evidence.get("result") == "PASS" else RELEASE_IDENTITY_EXIT_CODE
+    if args.verify_core_dependencies:
+        if gate_evidence.get("result") != "PASS":
+            print_release_identity_result(gate_evidence)
+            return RELEASE_IDENTITY_EXIT_CODE
+        if not verify_pillow_runtime():
+            return 1
+        try:
+            importlib.import_module("requests")
+            importlib.import_module("bs4")
+        except Exception:
+            print("Install the core Python dependencies from requirements.txt.")
+            return 1
+        return 0
     if args.self_test:
         if gate_evidence.get("result") != "PASS":
             print_release_identity_result(gate_evidence)
             print("Self-test blocked because the release identity gate did not PASS.")
             return RELEASE_IDENTITY_EXIT_CODE
+        if not verify_pillow_runtime():
+            return 1
         return run_self_test()
     config_path = Path(args.config).resolve() if args.config else root / CONFIG_FILENAME
     if args.diagnose or args.export_support:
@@ -7559,6 +7594,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print_release_identity_result(gate_evidence)
         print("Startup blocked before dependency/authenticated/network runtime. Run GatewayImageDownloader_DiagnosticsExport.bat for a Support Export20, or restore the full verified release ZIP.")
         return RELEASE_IDENTITY_EXIT_CODE
+    if not verify_pillow_runtime():
+        return 1
     browser_override: Optional[bool] = None
     if args.browser_mode:
         browser_override = True

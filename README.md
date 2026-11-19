@@ -28,7 +28,7 @@ This tool does **not** bypass authentication, paywalls, access controls, robots/
 
 ## Quick start
 
-Requirements: Windows 10/11 and Python 3.11 or newer.
+Requirements: Windows 10/11 and Python 3.11 or newer. Image processing requires Pillow 13. The Windows launcher checks the selected Python environment and installs the supported dependencies from requirements.txt when needed. For an existing manual setup, rerun the installation command below with the same Python interpreter.
 
 For the normal Windows workflow, extract the release to a writable folder and run `GatewayImageDownloader.bat`. Existing shortcuts that use `run_image_downloader.bat` continue to work through a compatibility redirect.
 
